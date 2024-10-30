@@ -13,6 +13,13 @@ from typing import Literal
 
 class NonNegLinear(nn.Module):
     def __init__(self, d_in, d_out, bias) -> None:
+        """Nonegative linear layer
+
+        :param d_in: number of input features
+        :param d_out: number of output features
+        :param bias: umimplemented
+        :raises NotImplementedError: when bias is True
+        """
         super().__init__()
         self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
         self.elu = nn.ELU()
@@ -21,6 +28,10 @@ class NonNegLinear(nn.Module):
 
     @property
     def weight(self):
+        """transform weight matrix to be non-negative
+
+        :return: transformed weight matrix
+        """
         return self.elu(self._weight) + 1
 
     def forward(self, x):
@@ -28,6 +39,13 @@ class NonNegLinear(nn.Module):
     
 class NormNonNegLinear(nn.Module):
     def __init__(self, d_in, d_out, bias) -> None:
+        """_summary_
+
+        :param d_in: number of input features
+        :param d_out: number of output features
+        :param bias: umimplemented
+        :raises NotImplementedError: when bias is True
+        """
         super().__init__()
         self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
         self.sigmoid = nn.Sigmoid()
@@ -36,6 +54,10 @@ class NormNonNegLinear(nn.Module):
 
     @property
     def weight(self):
+        """transform weight matrix to be non-negative
+
+        :return: transformed weight matrix
+        """
         temp =  self.sigmoid(self._weight)
         return temp / temp.sum()
 
@@ -44,6 +66,10 @@ class NormNonNegLinear(nn.Module):
 
 class ReverseNonNegLinear:
     def __init__(self, bnnl):
+        """A wrapper for reversed bidirectional non-negative linear layer
+
+        :param bnnl: A bidirectional non-negative linear layer
+        """
         self.bnnl = bnnl
     
     @property
@@ -58,6 +84,13 @@ class ReverseNonNegLinear:
 
 class BidirNonNegLinear(nn.Module):
     def __init__(self, d_in, d_out, bias) -> None:
+        """Bidirectional non-negative linear layer for orthogonalization
+
+        :param d_in: number of input features
+        :param d_out: number of output features
+        :param bias: unimplemented
+        :raises NotImplementedError: when bias is True
+        """
         super().__init__()
         self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) - 2)
         self._shift = torch.nn.Parameter(torch.zeros(1, d_in))
@@ -81,12 +114,20 @@ class BidirNonNegLinear(nn.Module):
     
 class NonNegBias(nn.Module):
     def __init__(self, d) -> None:
+        """Non-negative bias layer (i.e., add a non-negative vector to the output)
+
+        :param d: number of input/output features
+        """
         super().__init__()
         self._bias = torch.nn.Parameter(torch.zeros(1, d))
         self.elu = nn.ELU()
 
     @property
     def bias(self):
+        """Transform bias to be non-negative
+
+        :return: non-negative bias
+        """
         return self.elu(self._bias) + 1
 
     def forward(self, x):
@@ -95,6 +136,14 @@ class NonNegBias(nn.Module):
 
 class BilinearAttention(nn.Module):
     def __init__(self, d_in, d_ego, d_local, d_global, d_out=None):
+        """Bilinear attention layer
+
+        :param d_in: number of input features
+        :param d_ego: number of ego factors (deprecated; use local factors instead)
+        :param d_local: number of local factors
+        :param d_global: number of global factors
+        :param d_out: _description_, defaults to None (meaning d_out = d_in)
+        """
         super(BilinearAttention, self).__init__()
         if d_out is None:
             d_out = d_in
@@ -103,15 +152,19 @@ class BilinearAttention(nn.Module):
         self.d_local = d_local
         self.d_global = d_global
 
+        # A bias layer for the output to account for any "DC" component
         self.bias = NonNegBias(d_out)
 
+        # Ego factors (again, deprecated)
         self.qk_ego = nn.Linear(d_in, d_ego, bias=False)
         self.v_ego = BidirNonNegLinear(d_ego, d_out, bias=False)
 
+        # Local factors
         self.q_local = NormNonNegLinear(d_in, d_local, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
         self.k_local = NonNegLinear(d_in, d_local, bias=False) # each row ...
         self.v_local = NonNegLinear(d_local, d_out, bias=False) # each column ..
 
+        # Global factors
         self.q_global = NormNonNegLinear(d_in, d_global, bias=False) # each row ..
         self.k_global = NonNegLinear(d_in, d_global, bias=False) # each row ..
         self.v_global = NonNegLinear(d_global, d_out, bias=False) # each column ..
@@ -124,19 +177,36 @@ class BilinearAttention(nn.Module):
         self.q_local_emb = None
 
     def local_cell_cos(self):
+        """Cosine similarity of k & q embeddings of cells (over all cells)
+
+        :return: the cell-wise cosine similarity
+        """
         temp = self.cell_cos_sim(self.k_local_emb, self.q_local_emb).sum()
         # self.k_local_emb = None
         # self.q_local_emb = None
         return temp
 
     def local_cos(self):
+        """Cosine similarity of q & v metagenes (over all genes)
+
+        :return: the gene-wise cosine similarity
+        """
         return self.cos_sim(self.q_local.weight, self.v_local.weight.T).sum() # response v should be different from receiver q
     
     def global_cos(self):
+        """Cosine similarity of q & v and q & k metagenes (over all genes)
+
+        :return: the gene-wise cosine similarity
+        """
         return (self.cos_sim(self.q_global.weight, self.v_global.weight.T).sum() + # response v should be different from receiver q
                 self.cos_sim(self.q_global.weight, self.k_global.weight).sum())  
 
     def othorgonality(self, m):
+        """Orthogonality penalty for a matrix
+
+        :param m: _description_
+        :return: _description_
+        """
         temp = m @ m.transpose(0, 1)
         eye = torch.eye(m.shape[0]).to(m.get_device())
         return (temp - eye).pow(2.0).sum()

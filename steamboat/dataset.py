@@ -59,6 +59,7 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var=None) -> 
     # Sanity checks
     if mask_var is None:
         if 'highly_variable' in adatas[0].var.columns:
+            print(f"Using {mask_var} to mask variables. Explicitly specify `mask_var=False` to use all genes.")
             mask_var = 'highly_variable'
         else:
             mask_var = False
@@ -88,7 +89,7 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var=None) -> 
         
         # Gather spatial graph
         if sparse_graph:
-            have_equal_deg = True
+            # have_equal_deg = True
             v, u = adata.obsp['spatial_connectivities'].nonzero()
             k0 = u.shape[0] / adata.shape[0]
             k = int(np.round(k0))
@@ -98,8 +99,14 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var=None) -> 
             v = v[order]
 
             if np.abs(k - k0) < 1e-6 and (v.reshape([-1, k]) == np.arange(adata.shape[0])[:, None]).all():
+                # Case 1: All cells have a equal number of neighbors.
+                # E.g., direct result of k-NN graph
                 data_dict['adj'] = torch.from_numpy(np.vstack([u, v]))
             else:
+                # Case 2: Not all cells have the same number of neighbors.
+                # E.g., result of a radius graph, delaunay triangulation, a subgraph of a k-NN graph, etc.
+                # We find the cell with highest degree and pad the adjacency matrix with the cell itself.
+                # A separate mask is used to indicate the valid neighbors, so that the padding does not affect the computation.
                 ks = np.array(adata.obsp['spatial_connectivities'].sum(axis=0)).squeeze().astype(int)
                 max_k = int(ks.max())
                 unequal_nbs.append(i)
@@ -126,7 +133,8 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var=None) -> 
             data_dict['adj'] = torch.from_numpy((adata.obsp['spatial_connectivities'] == 1).toarray())
 
         datasets.append(data_dict)
-        
+    
+    # Let the user know if not all cells have the same number of neighbors in case something is wrong
     if unequal_nbs:
         print("Not all cells in the following samples have the same number of neighbors:")
         print(*unequal_nbs, sep=', ', end='.\n')
