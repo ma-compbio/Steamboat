@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 from .model import Steamboat
+# from .integrated_model # import IntegratedSteamboat
 from typing import Literal
 from torch import nn
 import scanpy as sc
@@ -213,6 +214,112 @@ def plot_transforms(model: Steamboat, top: int = 3, reorder: bool = False,
             fig.add_artist(line)
 
 
+def plot_regional_transforms(model: Steamboat, top: int = 3, reorder: bool = False, 
+                    figsize: str | tuple[float, float] = 'auto', 
+                    vmin: float = 0., vmax: float = 1.,
+                    xticklabels: tuple[str, str, str] = ['k', 'q', 'v']):
+    """Plot all metagenes
+
+    :param model: Steamboat model
+    :param top: Number of top genes per metagene to plot, defaults to 3
+    :param reorder: Reorder the genes by metagene, or keep the orginal ordering, defaults to False
+    :param figsize: Size of the figure, defaults to 'auto'
+    :param vmin: minimum value in the color bar, defaults to 0.
+    :param vmax: maximum value in the color bar, defaults to 1.
+    """
+    n_heads = model.spatial_gather.n_heads
+    n_scales = model.spatial_gather.n_scales
+
+    q = model.spatial_gather.q.weight.detach().cpu()
+    k = model.spatial_gather.k.weight.detach().cpu()
+    v = model.spatial_gather.v.weight.detach().cpu().T
+    switch = model.spatial_gather.switch().detach().cpu()
+
+    if top > 0:
+        if reorder:
+            rank_v = np.argsort(-v, axis=1)[:, :top]
+            rank_q = np.argsort(-q, axis=1)[:, :top]
+            rank_k = np.argsort(-k, axis=1)[:, :top]
+            feature_mask = {}
+            for i in range(n_heads):
+                for j in rank_k[i, :]:
+                    feature_mask[j] = None
+                for j in rank_q[i, :]:
+                    feature_mask[j] = None
+                for j in rank_v[i, :]:
+                    feature_mask[j] = None
+            feature_mask = list(feature_mask.keys())
+        else:
+            rank_v = rank(v)
+            rank_q = rank(q)
+            rank_k = rank(k)
+            max_rank = np.max(np.vstack([rank_v, rank_q, rank_k]), axis=0)
+            feature_mask = (max_rank > (max_rank.max() - 3))
+            
+        chosen_features = np.array(model.features)[feature_mask]
+    else:
+        feature_mask = list(range(len(model.features)))
+        chosen_features = np.array(model.features)
+
+    if figsize == 'auto':
+        figsize = (n_heads * 0.49 + 2 + .5, len(chosen_features) * 0.15 + .25 + .75)
+    # print(figsize)
+    fig, axes = plt.subplots(2, n_heads + 1, sharey='row', sharex='col',
+                                          figsize=figsize, 
+                                          height_ratios=(.75, len(chosen_features) * .15 + .25))
+    plot_axes = axes[1]
+    bar_axes = axes[0]
+    cbar_ax = plot_axes[-1].inset_axes([0.0, 0.1, 1.0, .8])
+    common_params = {'linewidths': .05, 'linecolor': 'gray', 'yticklabels': chosen_features, 
+                     'cmap': 'Reds', 'cbar_kws': {"orientation": "vertical"}, 'square': True,
+                     'vmax': vmax, 'vmin': vmin}
+
+    for i in range(0, n_heads):
+        title = ''
+        what = f'{i}'
+        to_plot = np.vstack((k[i, feature_mask],
+                             q[i, feature_mask],
+                             v[i, feature_mask])).T
+        
+        true_vmax = to_plot.max(axis=0)
+        # print(true_vmax)
+        to_plot /= true_vmax
+ 
+        bar_axes[i].bar(np.arange(len(true_vmax)) + .5, true_vmax)
+        bar_axes[i].set_xticks(np.arange(len(true_vmax)) + .5, [''] * len(true_vmax))
+        bar_axes[i].set_yscale('log')
+        bar_axes[i].set_title(title, size=10, fontweight='bold')
+        if i != 0:
+            bar_axes[i].get_yaxis().set_visible(False)
+        for pos in ['right', 'top', 'left']:
+            if pos == 'left' and i == 0:
+                continue
+            else:
+                bar_axes[i].spines[pos].set_visible(False)
+        sns.heatmap(to_plot, xticklabels=xticklabels, ax=plot_axes[i], 
+                    **common_params, cbar_ax=cbar_ax)
+        plot_axes[i].set_xlabel(f"{what}")
+        
+    # All text straight up
+    for i in range(n_heads):
+        plot_axes[i].set_xticklabels(plot_axes[i].get_xticklabels(), rotation=0)
+
+    for i in range(1, n_heads):
+        plot_axes[i].get_yaxis().set_visible(False)
+
+    # Remove duplicate cbars
+    bar_axes[-1].set_visible(False)
+
+    plot_axes[-1].get_yaxis().set_visible(False)
+    plot_axes[-1].get_xaxis().set_visible(False)
+    for pos in ['right', 'top', 'bottom', 'left']:
+        plot_axes[-1].spines[pos].set_visible(False)
+    # axes[-1].set_visible(False)
+
+    fig.align_xlabels()
+    plt.tight_layout()
+
+
 def plot_transform(model, scope: Literal['ego', 'local', 'global'], d, 
                    top: int = 3, reorder: bool = False, 
                    figsize: str | tuple[float, float] = 'auto'):
@@ -278,6 +385,196 @@ def plot_transform(model, scope: Literal['ego', 'local', 'global'], d,
     plt.tight_layout()
 
 
+def plot_transforms(model: Steamboat, top: int = 3, reorder: bool = False, 
+                    figsize: str | tuple[float, float] = 'auto', 
+                    qkv_colors: list[str] = palettes['npg3'],
+                    vmin: float = 0., vmax: float = 1.):
+    """Plot all metagenes
+
+    :param model: Steamboat model
+    :param top: Number of top genes per metagene to plot, defaults to 3
+    :param reorder: Reorder the genes by metagene, or keep the orginal ordering, defaults to False
+    :param figsize: Size of the figure, defaults to 'auto'
+    :param qkv_colors: Colors for the bar plot showing the magnitude of each metagene before normalization, defaults to palettes['npg3']
+    :param vmin: minimum value in the color bar, defaults to 0.
+    :param vmax: maximum value in the color bar, defaults to 1.
+    """
+    assert len(qkv_colors) == 3, f"Expect a color palette with at 3 colors, get {len(qkv_colors)}."
+    d_ego : int = model.spatial_gather.d_ego
+    d_loc : int = model.spatial_gather.d_local
+    d_glb : int = model.spatial_gather.d_global
+    d : int = d_ego + d_loc + d_glb
+
+    qk_ego, v_ego = model.get_ego_transform()
+    q_local, k_local, v_local = model.get_local_transform()
+    q_global, k_global, v_global = model.get_global_transform()
+
+    if top > 0:
+        if reorder:
+            rank_v_ego = np.argsort(-v_ego, axis=1)[:, :top]
+            rank_q_local = np.argsort(-np.abs(q_local), axis=1)[:, :top]
+            rank_k_local = np.argsort(-k_local, axis=1)[:, :top]
+            rank_v_local = np.argsort(-v_local, axis=1)[:, :top]
+            rank_q_global = np.argsort(-np.abs(q_global), axis=1)[:, :top]
+            rank_k_global = np.argsort(-k_global, axis=1)[:, :top]
+            rank_v_global = np.argsort(-v_global, axis=1)[:, :top]
+            feature_mask = {}
+            for i in rank_v_ego:
+                for j in i:
+                    feature_mask[j] = None
+            for i in range(d_loc):
+                for j in rank_k_local[i, :]:
+                    feature_mask[j] = None
+                for j in rank_q_local[i, :]:
+                    feature_mask[j] = None
+                for j in rank_v_local[i, :]:
+                    feature_mask[j] = None
+            for i in range(d_glb):
+                for j in rank_k_global[i, :]:
+                    feature_mask[j] = None
+                for j in rank_q_global[i, :]:
+                    feature_mask[j] = None
+                for j in rank_v_global[i, :]:
+                    feature_mask[j] = None
+            feature_mask = list(feature_mask.keys())
+        else:
+            rank_v_ego = rank(v_ego)
+            rank_q_local = rank(np.abs(q_local))
+            rank_k_local = rank(k_local)
+            rank_v_local = rank(v_local)
+            rank_q_global = rank(np.abs(q_global))
+            rank_k_global = rank(k_global)
+            rank_v_global = rank(v_global)
+            max_rank = np.max(np.vstack([rank_v_ego, 
+                                        rank_q_local, 
+                                        rank_k_local, 
+                                        rank_v_local, 
+                                        rank_q_global, 
+                                        rank_k_global, 
+                                        rank_v_global]), axis=0)
+            feature_mask = (max_rank > (max_rank.max() - 3))
+            
+        chosen_features = np.array(model.features)[feature_mask]
+    else:
+        feature_mask = list(range(len(model.features)))
+        chosen_features = np.array(model.features)
+
+    if figsize == 'auto':
+        figsize = (d_ego * 0.36 + (d_loc + d_glb) * 0.49 + 2 + .5, len(chosen_features) * 0.15 + .25 + .75)
+    # print(figsize)
+    fig, axes = plt.subplots(2, d + 1, sharey='row', sharex='col',
+                                          figsize=figsize, 
+                                          height_ratios=(.75, len(chosen_features) * .15 + .25),
+                                          width_ratios=[2] * d_ego + [3] * (d_loc + d_glb) + [.5])
+    plot_axes = axes[1]
+    bar_axes = axes[0]
+    cbar_ax = plot_axes[-1].inset_axes([0.0, 0.1, 1.0, .8])
+    common_params = {'linewidths': .05, 'linecolor': 'gray', 'yticklabels': chosen_features, 
+                     'cmap': 'Reds', 'cbar_kws': {"orientation": "vertical"}, 'square': True,
+                     'vmax': vmax, 'vmin': vmin}
+
+    # Local
+    #
+    for i in range(0, d_loc + d_glb + d_ego):
+        title = ''
+        if i < d_ego:
+            what = f'{i}'
+            if i == (d_ego - 1) // 2:
+                if d_ego % 2 == 0:
+                    title += '          '
+                title += 'Ego'
+            labels = ('u', 'v')
+            to_plot = np.vstack((qk_ego[i, feature_mask],
+                                 v_ego[i, feature_mask])).T
+            color = qkv_colors[1:]
+        elif i < d_loc + d_ego:
+            j = i - d_ego
+            what = f'{j}'
+            if i == (d_loc - 1) // 2 + d_ego:
+                if d_loc % 2 == 0:
+                    title += '          '
+                title += 'Local'
+            labels = ('k', 'q', 'v')
+            to_plot = np.vstack((k_local[j, feature_mask],
+                                 q_local[j, feature_mask],
+                                 v_local[j, feature_mask])).T
+            color = qkv_colors
+        else:
+            j = i - d_ego - d_loc
+            what = f'{j}'
+            if i == (d_glb - 1) // 2 + d_ego + d_loc:
+                if d_glb % 2 == 0:
+                    title += '          '
+                title += 'Global'
+            labels = ('k', 'q', 'v')
+            to_plot = np.vstack((k_global[j, feature_mask],
+                                 q_global[j, feature_mask],
+                                 v_global[j, feature_mask])).T
+            color = qkv_colors
+        
+        true_vmax = to_plot.max(axis=0)
+        # print(true_vmax)
+        to_plot /= true_vmax
+ 
+        bar_axes[i].bar(np.arange(len(true_vmax)) + .5, true_vmax, color=color)
+        bar_axes[i].set_xticks(np.arange(len(true_vmax)) + .5, [''] * len(true_vmax))
+        bar_axes[i].set_yscale('log')
+        bar_axes[i].set_title(title, size=10, fontweight='bold')
+        if i != 0:
+            bar_axes[i].get_yaxis().set_visible(False)
+        for pos in ['right', 'top', 'left']:
+            if pos == 'left' and i == 0:
+                continue
+            else:
+                bar_axes[i].spines[pos].set_visible(False)
+        sns.heatmap(to_plot, xticklabels=labels, ax=plot_axes[i], 
+                    **common_params, cbar_ax=cbar_ax)
+        plot_axes[i].set_xlabel(f"{what}")
+        
+    # All text straight up
+    for i in range(d_ego + d_loc + d_glb):
+        plot_axes[i].set_xticklabels(plot_axes[i].get_xticklabels(), rotation=0)
+
+    for i in range(1, d_ego + d_loc + d_glb):
+        plot_axes[i].get_yaxis().set_visible(False)
+
+    # Remove duplicate cbars
+    bar_axes[-1].set_visible(False)
+
+    plot_axes[-1].get_yaxis().set_visible(False)
+    plot_axes[-1].get_xaxis().set_visible(False)
+    for pos in ['right', 'top', 'bottom', 'left']:
+        plot_axes[-1].spines[pos].set_visible(False)
+    # axes[-1].set_visible(False)
+
+    fig.align_xlabels()
+    plt.tight_layout()
+
+    # Subplots sep lines [credit: https://stackoverflow.com/a/55465138]
+    r = fig.canvas.get_renderer()
+    get_bbox = lambda ax: ax.get_tightbbox(r).transformed(fig.transFigure.inverted())
+    bboxes = np.array(list(map(get_bbox, axes[1,:-1].flat)), mpl.transforms.Bbox)
+
+    #Get the minimum and maximum extent, get the coordinate half-way between those
+    xmax = bboxes[:, 1, 0]
+    xmin = bboxes[:, 0, 0]
+
+    # print(xmax, xmin)
+
+    xs = np.c_[xmax[:-1], xmin[1:]].mean(axis=1)
+
+    # for x in xmax:
+    #     line = plt.Line2D([x, x],[0, 1], transform=fig.transFigure, color="red", linewidth=1.)
+    #     fig.add_artist(line)
+
+    # for x in xmin:
+    #     line = plt.Line2D([x, x],[0, 1], transform=fig.transFigure, color="blue", linewidth=1.)
+    #     fig.add_artist(line)
+
+    for i, x in enumerate(xs):
+        if i in (d_ego - 1, d_ego + d_loc - 1):
+            line = plt.Line2D([x, x],[0, 1], transform=fig.transFigure, color="black", linewidth=.5)
+            fig.add_artist(line)
 
 
 def annotate_adatas(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steamboat, 

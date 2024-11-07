@@ -350,7 +350,6 @@ class BilinearAttention(nn.Module):
         else:
             return res
 
-
     
 class Steamboat(nn.Module):
     def __init__(self, features: list[str] | int, d_ego, d_local, d_global):
