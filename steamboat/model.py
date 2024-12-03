@@ -452,7 +452,7 @@ class Steamboat(nn.Module):
         for epoch in range(max_epoch):
             total_loss = 0.
             total_penalty = 0.
-            for x, adj_matrix in loader:
+            for x, adj_matrix, _, _ in loader:
                 x = x.squeeze(0).to(device)
                 adj_matrix = adj_matrix.squeeze(0).to(device)
                 masked_x = self.masking(x, masking_rate, masking_method)

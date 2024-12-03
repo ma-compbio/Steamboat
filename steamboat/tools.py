@@ -733,8 +733,6 @@ def segment(adata: sc.AnnData, resolution: float = 1., *,
     return sc.tl.leiden(adata, obsp=obsp_combined, key_added=key_added, resolution=resolution, **leiden_kwargs)
 
 
-
-
 def plot_transforms_combined(model, top=3, reorder=False, figsize='auto'):
     d_ego = model.spatial_gather.d_ego
     d_loc = model.spatial_gather.d_local

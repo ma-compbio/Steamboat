@@ -37,6 +37,18 @@ class NonNegLinear(nn.Module):
     def forward(self, x):
         return x @ self.weight.T
     
+class TransposedNonNegLinear(nn.Module):
+    def __init__(self, orig_layer):
+        super().__init__()
+        self.orig_layer = orig_layer
+
+    @property
+    def weight(self):
+        return self.orig_layer.weight.T
+    
+    def forward(self, x):
+        return x @ self.weight.T
+
 class NormNonNegLinear(nn.Module):
     def __init__(self, d_in, d_out, bias) -> None:
         """_summary_
@@ -123,7 +135,7 @@ class BilinearAttention(nn.Module):
         self.n_heads = n_heads
         self.n_scales = n_scales
 
-        self.switch = ScaleSwtich(n_heads, n_scales=2)
+        # self.switch = ScaleSwtich(n_heads, n_scales=2)
 
         # A bias layer for the output to account for any "DC" component
         self.bias = NonNegBias(d_out)
@@ -133,6 +145,7 @@ class BilinearAttention(nn.Module):
         self.q = NonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
         self.k = NonNegLinear(d_in, n_heads, bias=False) # each row ...
         self.v = NonNegLinear(n_heads, d_out, bias=False) # each column ..
+        # self.v = TransposedNonNegLinear(self.q)
 
         # remember some variables during forward
         # Note: with gradient; detach before use when gradient is not needed
@@ -142,13 +155,13 @@ class BilinearAttention(nn.Module):
 
         self.cosine_similarity = nn.CosineSimilarity(dim=-2)
 
-    def score_intrinsic(self, q_emb):
+    def score_intrinsic(self, q_emb, k_emb):
         """Score intrinsic factors. No attention to other cells/environment.
 
         :param q_emb: query scores
         :return: ego scores
         """
-        scores = q_emb ** 2
+        scores = q_emb * k_emb
         return scores
 
     def score_interactive(self, q_emb, k_emb, adj_list):
@@ -162,12 +175,22 @@ class BilinearAttention(nn.Module):
         q = q_emb[adj_list[1, :], :] # n * g ---v-> kn * d
         k = k_emb[adj_list[0, :], :] # n * g ---u-> kn * d
         scores = q * k # nk * d
+        nominal_k = scores.shape[0] // q_emb.shape[0]
         if adj_list.shape[0] == 3: # masked for unequal neighbors
             scores.masked_fill_((adj_list[2, :] == 0).reshape([-1, 1]), 0.)
-        n = scores.shape[0] // q_emb.shape[0]
-        scores = scores.reshape([q_emb.shape[0], n, self.n_heads]) # n * k * d 
+
+        # reshape
+        scores = scores.reshape([q_emb.shape[0], nominal_k, self.n_heads]) # n * k * d 
         scores = scores.transpose(-1, -2)
-        return scores    
+
+        # Normalize by the actual number of neighbors
+        if adj_list.shape[0] == 3:
+            actual_k = adj_list[2, :].reshape(q_emb.shape[0], nominal_k).sum(axis=1) # TODO: memorize this
+            scores /= actual_k[:, None, None] 
+        else:
+            scores /= nominal_k
+
+        return scores
 
     def flat_k_penalty(self, kind: Literal['entropy', 'cosine', 'variance']):
         """Scoring how homogeneous the k_emb is over all cells.
@@ -206,15 +229,17 @@ class BilinearAttention(nn.Module):
             masked_x = x
 
         # Get embeddings for all cells and regions
-        q_emb = self.q(masked_x) / x.shape[1]
-        k_local_emb = self.k(x) / x.shape[1]
-        k_regional_embs = [self.k(regional_x) / x.shape[1] for regional_x in regional_xs]
+        q_emb = self.q(masked_x) / (x.shape[1] ** .5)
+        k_local_emb = self.k(x) / (x.shape[1] ** .5)
+        k_regional_embs = [self.k(regional_x) / (x.shape[1] ** .5) for regional_x in regional_xs]
 
         # Get raw attention scores
-        scale_switch = self.switch() # h * s
-        ego_score = self.score_intrinsic(q_emb) * scale_switch[:, 0].reshape([1, self.n_heads])
-        local_score = self.score_interactive(q_emb, k_local_emb, adj_list) * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
-        regional_scores = [self.score_interactive(q_emb, k_regional_emb, adj_list) * scale_switch[:, i + 2].reshape([1, self.n_heads, 1]) for i, k_regional_emb in enumerate(k_regional_embs)]
+        # scale_switch = self.switch() # h * s
+        ego_score = self.score_intrinsic(q_emb, q_emb) # * scale_switch[:, 0].reshape([1, self.n_heads])
+        local_score = self.score_interactive(q_emb, k_local_emb, adj_list) #  * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
+        regional_scores = [self.score_interactive(q_emb, k_regional_emb, regional_adj_list) 
+                           for i, (k_regional_emb, regional_adj_list) in enumerate(zip(k_regional_embs, regional_adj_lists))]
+        # regional_scores = [self.score_interactive(q_emb, k_regional_emb, adj_list) * scale_switch[:, i + 2].reshape([1, self.n_heads, 1]) for i, k_regional_emb in enumerate(k_regional_embs)]
 
         # Normalize attention scores
         sum_local_score = torch.sum(local_score, dim=-1)
@@ -231,8 +256,8 @@ class BilinearAttention(nn.Module):
 
         if get_details:
             ego_attnp = ego_score / normalization_factor
-            local_attnp = sum_local_score / normalization_factor[:, :, None]
-            regional_attnps = [regional_score / normalization_factor[:, :, None] for regional_score in sum_regional_scores]
+            local_attnp = local_score / normalization_factor[:, :, None]
+            regional_attnps = [regional_score / normalization_factor[:, :, None] for regional_score in regional_scores]
 
             ego_attnm = ego_attnp
             local_attnm = local_attnp.sum(axis=-1)
@@ -290,7 +315,9 @@ class Steamboat(nn.Module):
             device:str = 'cuda', 
             *, 
             flat_k_penalty: float = 0.0, flat_k_penalty_args=None, switch_l2_penalty: float = 0.0, weight_l2_penalty: float = 0.0,
-            opt=None, opt_args=None, max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
+            opt=None, opt_args=None, 
+            loss_fun=None,
+            max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
             log_dir: str = 'log/', report_per: int = 10):
         """Create a PyTorch Dataset from a list of adata
 
@@ -301,6 +328,8 @@ class Steamboat(nn.Module):
         :param local_entropy_penalty: entropy penalty to make the local attention more diverse
         :param opt: Optimizer for fitting
         :param opt_args: Arguments for optimizer (e.g., {'lr': 0.01})
+        :param loss_fun: Loss function: Default is MSE (`nn.MSELoss`). 
+        You may use MAE `nn.L1Loss`, Huber 'nn.HuberLoss`, SmoothL1 `nn.SmoothL1Loss`, or a customized loss function.
         :param max_epoch: maximum number of epochs
         :param stop_eps: Stopping criterion: minimum change (see also `stop_tol`)
         :param stop_tol: Stopping criterion: number of epochs that don't meet `stop_eps` before stopping
@@ -314,18 +343,20 @@ class Steamboat(nn.Module):
         loader = DataLoader(dataset, batch_size=1, shuffle=True)
         parameters = self.parameters()
 
-        if opt_args is None:
-            opt_args = {}
-
         if flat_k_penalty_args is None:
             flat_k_penalty_args = {}
 
+        if loss_fun is None:
+            criterion = nn.MSELoss()
+        else:
+            criterion = loss_fun
+
+        if opt_args is None:
+            opt_args = {}
         if opt is None:
             optimizer = optim.Adam(parameters, **opt_args)
         else:
             optimizer = opt(parameters, **opt_args)
-        
-        criterion = nn.MSELoss()
 
         os.makedirs(log_dir, exist_ok=True)
         logger = _get_logger('train', log_dir)
@@ -336,7 +367,7 @@ class Steamboat(nn.Module):
         for epoch in range(max_epoch):
             total_loss = 0.
             total_penalty = 0.
-            for x, adj_list, regional_adj_lists, regional_xs in loader:
+            for x, adj_list, regional_xs, regional_adj_lists in loader:
                 # Send everything to required device
                 adj_list = adj_list.squeeze(0).to(device)
                 x = x.squeeze(0).to(device)
@@ -347,7 +378,7 @@ class Steamboat(nn.Module):
 
                 x_recon = self.forward(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False)
                 
-                loss = criterion(x, x_recon)
+                loss = criterion(x_recon, x)
                 total_loss += loss.item()
                 # loss = loss * x.shape[0] / 10000 # handle size differences among datasets; larger dataset has higher weight
 
@@ -355,9 +386,9 @@ class Steamboat(nn.Module):
                 if flat_k_penalty > 0.:
                     reg += self.spatial_gather.flat_k_penalty(**flat_k_penalty_args) * flat_k_penalty
                     total_penalty += reg.item()
-                if switch_l2_penalty > 0.:
-                    reg += self.spatial_gather.switch.l2_reg() * switch_l2_penalty
-                    total_penalty += reg.item()
+                # if switch_l2_penalty > 0.:
+                #     reg += self.spatial_gather.switch.l2_reg() * switch_l2_penalty
+                #     total_penalty += reg.item()
                 if weight_l2_penalty > 0.:
                     reg += self.spatial_gather.l2_reg() * weight_l2_penalty
                     total_penalty += reg.item()

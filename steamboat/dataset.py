@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import squidpy as sq
 import scanpy as sc
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import scipy as sp
 from typing import Union
 import scipy.sparse
@@ -47,8 +47,8 @@ def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, log_norm=True) -> l
             sq.gr.spatial_neighbors(adata, n_neighs=n_neighs)
     return adatas
 
-
-def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = None, region_obs: str | list[str] = None) -> SteamboatDataset:
+def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = None, 
+                 regional_obs: str | list[str] = None) -> SteamboatDataset:
     """Create a PyTorch Dataset from a list of adata
     The input data should be a list of AnnData that contains 1. raw counts or normalized counts
     :param adatas: A list of `SCANPY AnnData`
@@ -71,13 +71,13 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = No
         for i in range(1, len(adatas)):
             assert (adatas[i].var[mask_var] == temp).all(), f"Not all adatas have {mask_var} in var"
 
-    if region_obs is None:
+    if regional_obs is None:
         print('No regional annotation, so the dataset will only support ego and local attention. To enalbe regional attention, provide a region_obs.')
-    elif isinstance(region_obs, str):
-        print(f'Using {region_obs} as regional annotation.')
-    elif isinstance(region_obs, list):
-        assert all(isinstance(i, str) for i in region_obs), 'region_obs should be a string or a list of strings.'
-        print(f'Using {region_obs} as regional annotations.')
+    elif isinstance(regional_obs, str):
+        print(f'Using {regional_obs} as regional annotation.')
+    elif isinstance(regional_obs, list):
+        assert all(isinstance(i, str) for i in regional_obs), 'region_obs should be a string or a list of strings.'
+        print(f'Using {regional_obs} as regional annotations.')
     else:
         raise ValueError('region_obs should be a string or a list of strings.')
 
@@ -145,6 +145,19 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = No
         # Placeholders for regional data
         data_dict['regional_Xs'] = []
         data_dict['regional_adjs'] = []
+        
+        for key in regional_obs:
+            unique_values = adata.obs[key].unique()
+            if unique_values.shape[0] != 1:
+                raise NotImplementedError('Only support one unique value for regional observation.')
+            else:
+                temp_X = data_dict['X'].mean(axis=0, keepdim=True)
+                v = np.arange(adata.shape[0], dtype=int)
+                u = np.zeros(adata.shape[0], dtype=int)
+                temp_adj = torch.from_numpy(np.vstack([u, v]))
+
+            data_dict['regional_Xs'].append(temp_X)
+            data_dict['regional_adjs'].append(temp_adj)
 
         datasets.append(data_dict)
     
