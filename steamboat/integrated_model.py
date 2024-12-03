@@ -300,10 +300,10 @@ class Steamboat(nn.Module):
         """
         out_x = x.clone()
         if entry_masking_rate > 0.:
-            random_mask = torch.rand(x.shape, device=x.get_device()) < entry_masking_rate
+            random_mask = torch.rand(x.shape, device=x.device) < entry_masking_rate
             out_x.masked_fill_(random_mask, 0.)
         if feature_masking_rate > 0.:
-            random_mask = torch.rand([1, x.shape[1]], device=x.get_device()) < feature_masking_rate
+            random_mask = torch.rand([1, x.shape[1]], device=x.device) < feature_masking_rate
             out_x.masked_fill_(random_mask, 0.)
         return out_x
 
