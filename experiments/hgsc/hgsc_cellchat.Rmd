@@ -1,0 +1,179 @@
+---
+title: "HGSC_Cellchat"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(CellChat)
+```
+
+## Load Data
+
+```{r}
+obj <- readRDS("G:/data/HGSC/SeuratObj/ST_Discovery_so.rds")
+```
+
+```{r}
+sample_meta <- readxl::read_excel("G:/data/HGSC/sample_metadata.xlsx", sheet = "Table 2b", skip = 1, )
+
+mask = (sample_meta['sites_binary'] == 'Adnexa') & (sample_meta['treatment'] == 'Untreated')
+samples_of_interest = sample_meta$profile[mask]
+
+sample_meta
+samples_of_interest
+```
+
+
+```{r}
+table(obj$samples)
+obj <- obj[, obj$samples %in% samples_of_interest]
+```
+
+```{r}
+obj <- obj[, obj$samples == "SMI_T10_F001"]
+```
+
+
+```{r}
+centroids_data <- obj@meta.data[c('x', 'y')]
+rownames(centroids_data) <- NULL
+centroids_data['cell'] <- rownames(obj@meta.data)
+cents <- CreateCentroids(centroids_data)
+coords <- CreateFOV(coords = list("centroids" = cents), type = "centroids")
+obj[["fov"]]<-subset(coords, cell=Cells(obj))
+```
+
+```{r}
+ImageDimPlot(obj, group.by='cell.types', size=2, dark.background=FALSE)
+```
+
+
+## Prepare CellChat inputs
+
+```{r}
+options(future.globals.maxSize = 8000 * 1024^2)
+obj <- SCTransform(obj, assay = "RNA", clip.range = c(-10, 10), verbose = FALSE)
+
+data.input = GetAssayData(obj, slot = "data", assay = "SCT")
+```
+
+```{r}
+spatial.locs = as.matrix(GetTissueCoordinates(obj, scale = NULL)[c('x', 'y')])
+```
+
+```{r}
+nolc <- function(x){
+  if (stringr::str_sub(x, -3, -1) == '_LC') {
+    return(stringr::str_sub(x, 0, -4))
+  } else {
+      return(x)
+  }
+  }
+obj$cell.types.nolc = sapply(obj$cell.types, nolc)
+table(obj$cell.types.nolc)
+```
+
+
+```{r}
+meta = obj@meta.data[c('samples', 'cell.types.nolc')]
+```
+
+### Set `spatial.factors` for CosMx (See [CellChat tutorial] (https://htmlpreview.github.io/?https://github.com/jinworks/CellChat/blob/master/tutorial/FAQ_on_applying_CellChat_to_spatial_transcriptomics_data.html)).
+```{r}
+# conversion.factor = 0.18
+# d = computeCellDistance(spatial.locs)
+# spot.size = min(d)*conversion.factor # converting the distance in Pixels to Micrometers
+# spatial.factors = data.frame(ratio = conversion.factor, tol = spot.size/2)
+# The result for one sample is 0.093, so we use tol = 0.05 generally, skipping the calculation
+spatial.factors = data.frame(ratio = 0.18, tol = 0.05)
+```
+
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = 'cell.types.nolc',
+                           datatype = "spatial", coordinates = spatial.locs, 
+                           spatial.factors = spatial.factors)
+```
+
+```{r}
+CellChatDB <- CellChatDB.human
+showDatabaseCategory(CellChatDB)
+```
+
+```{r}
+dplyr::glimpse(CellChatDB$interaction)
+```
+
+```{r}
+table(CellChatDB$interaction$annotation)
+```
+
+```{r}
+CellChatDB.use <- subsetDB(CellChatDB, search = "Cell-Cell Contact", key = "annotation") # use Secreted Signaling
+
+# use a subset of CellChatDB for cell-cell communication analysis
+# CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling", key = "annotation") # use Secreted Signaling
+
+# Only uses the Secreted Signaling from CellChatDB v1
+#  CellChatDB.use <- subsetDB(CellChatDB, search = list(c("Secreted Signaling"), c("CellChatDB v1")), key = c("annotation", "version"))
+
+# use all CellChatDB except for "Non-protein Signaling" for cell-cell communication analysis
+# CellChatDB.use <- subsetDB(CellChatDB)
+
+# use all CellChatDB for cell-cell communication analysis
+# CellChatDB.use <- CellChatDB # simply use the default CellChatDB. We do not suggest to use it in this way because CellChatDB v2 includes "Non-protein Signaling" (i.e., metabolic and synaptic signaling) that can be only estimated from gene expression data. 
+
+cellchat@DB <- CellChatDB.use
+```
+
+```{r}
+# subset the expression data of signaling genes for saving computation cost
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multisession", workers = 4) 
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat, variable.both = F)
+
+# project gene expression data onto PPI (Optional: when running it, USER should set `raw.use = FALSE` in the function `computeCommunProb()` in order to use the projected data)
+# cellchat <- projectData(cellchat, PPI.mouse)
+# execution.time = Sys.time() - ptm
+# print(as.numeric(execution.time, units = "secs"))
+#> [1] 18.24813
+```
+
+
+```{r}
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1,
+                              distance.use = TRUE, interaction.range = 100, scale.distance = 6.2,
+                              contact.dependent = TRUE, contact.range = 20)
+```
+
+```{r}
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+```
+
+```{r}
+cellchat <- computeCommunProbPathway(cellchat)
+```
+
+```{r}
+cellchat <- aggregateNet(cellchat)
+
+# execution.time = Sys.time() - ptm
+# print(as.numeric(execution.time, units = "secs"))
+```
+
+```{r}
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+```
+
+```{r}
+netVisual_heatmap(cellchat, measure = "count", color.heatmap = "Blues")
+```
+
+```{r}
+netVisual_heatmap(cellchat, measure = "weight", color.heatmap = "Blues")
+```
+
