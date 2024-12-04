@@ -1,0 +1,23 @@
+[2024-12-03 16:38:43,533::train::INFO] Epoch 1: train_loss 1.23568, reg 0.000043
+[2024-12-03 16:38:44,462::train::INFO] Epoch 201: train_loss 0.20168, reg 0.004905
+[2024-12-03 16:38:45,389::train::INFO] Epoch 401: train_loss 0.19758, reg 0.005375
+[2024-12-03 16:38:46,316::train::INFO] Epoch 601: train_loss 0.15560, reg 0.005788
+[2024-12-03 16:38:47,245::train::INFO] Epoch 801: train_loss 0.28456, reg 0.005929
+[2024-12-03 16:38:48,175::train::INFO] Epoch 1001: train_loss 0.15693, reg 0.005881
+[2024-12-03 16:38:49,111::train::INFO] Epoch 1201: train_loss 0.15408, reg 0.006101
+[2024-12-03 16:38:50,044::train::INFO] Epoch 1401: train_loss 0.24344, reg 0.005936
+[2024-12-03 16:38:50,982::train::INFO] Epoch 1601: train_loss 0.26842, reg 0.006073
+[2024-12-03 16:38:51,917::train::INFO] Epoch 1801: train_loss 0.18322, reg 0.006070
+[2024-12-03 16:38:52,408::train::INFO] Epoch 1906: train_loss 0.25064, reg 0.006039
+[2024-12-03 16:38:52,410::train::INFO] Stopping criterion met.
+[2024-12-04 12:17:41,360::train::INFO] Epoch 1: train_loss 1.23570, reg 0.000043
+[2024-12-04 12:17:42,111::train::INFO] Epoch 201: train_loss 0.26669, reg 0.004752
+[2024-12-04 12:17:42,859::train::INFO] Epoch 401: train_loss 0.15106, reg 0.005423
+[2024-12-04 12:17:43,607::train::INFO] Epoch 601: train_loss 0.22334, reg 0.005756
+[2024-12-04 12:17:44,354::train::INFO] Epoch 801: train_loss 0.27393, reg 0.006135
+[2024-12-04 12:17:45,101::train::INFO] Epoch 1001: train_loss 0.26906, reg 0.006029
+[2024-12-04 12:17:45,854::train::INFO] Epoch 1201: train_loss 0.17629, reg 0.006072
+[2024-12-04 12:17:46,600::train::INFO] Epoch 1401: train_loss 0.15817, reg 0.006061
+[2024-12-04 12:17:47,344::train::INFO] Epoch 1601: train_loss 0.27599, reg 0.006143
+[2024-12-04 12:17:47,746::train::INFO] Epoch 1709: train_loss 0.18307, reg 0.006075
+[2024-12-04 12:17:47,747::train::INFO] Stopping criterion met.

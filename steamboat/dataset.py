@@ -26,6 +26,17 @@ class SteamboatDataset(Dataset):
     def __getitem__(self, index):
         sample = self.data[index]
         return sample['X'], sample['adj'], sample['regional_Xs'], sample['regional_adjs']
+
+    def to(self, device):
+        new_data = []
+        for sample in self.data:
+            new_sample = {}
+            new_sample['X'] = sample['X'].to(device)
+            new_sample['adj'] = sample['adj'].to(device)
+            new_sample['regional_Xs'] = [j.to(device) for j in sample['regional_Xs']]
+            new_sample['regional_adjs'] = [j.to(device) for j in sample['regional_adjs']]
+            new_data.append(new_sample)
+        return SteamboatDataset(new_data, sparse_graph=self.sparse_graph)
     
 
 def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, log_norm=True) -> list[sc.AnnData]:
