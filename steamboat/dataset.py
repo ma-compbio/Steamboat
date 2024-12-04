@@ -28,6 +28,9 @@ class SteamboatDataset(Dataset):
         return sample['X'], sample['adj'], sample['regional_Xs'], sample['regional_adjs']
 
     def to(self, device):
+        """Send everything to a device. Always copy (even if it's on the device already).
+        
+        """
         new_data = []
         for sample in self.data:
             new_sample = {}
