@@ -21,7 +21,7 @@ class NonNegLinear(nn.Module):
         :raises NotImplementedError: when bias is True
         """
         super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
+        self._weight = torch.nn.Parameter(torch.zeros(d_out, d_in) - 2)
         self.elu = nn.ELU()
         if bias:
             raise NotImplementedError()
@@ -50,7 +50,7 @@ class TransposedNonNegLinear(nn.Module):
         return x @ self.weight.T
 
 class NormNonNegLinear(nn.Module):
-    def __init__(self, d_in, d_out, bias) -> None:
+    def __init__(self, d_in, d_out, bias, eps=1e-6) -> None:
         """_summary_
 
         :param d_in: number of input features
@@ -59,8 +59,9 @@ class NormNonNegLinear(nn.Module):
         :raises NotImplementedError: when bias is True
         """
         super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
+        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 5)
         self.sigmoid = nn.Sigmoid()
+        self.eps = eps
         if bias:
             raise NotImplementedError()
 
@@ -70,8 +71,8 @@ class NormNonNegLinear(nn.Module):
 
         :return: transformed weight matrix
         """
-        temp =  self.sigmoid(self._weight)
-        return temp / temp.sum()
+        temp = self.sigmoid(self._weight)
+        return temp / (temp.sum(axis=1, keepdim=True) + self.eps)
 
     def forward(self, x):
         return x @ self.weight.T
@@ -97,6 +98,27 @@ class NonNegBias(nn.Module):
 
     def forward(self, x):
         return x + self.bias
+    
+class NonNegScale(nn.Module):
+    def __init__(self, d) -> None:
+        """Non-negative bias layer (i.e., add a non-negative vector to the output)
+
+        :param d: number of input/output features
+        """
+        super().__init__()
+        self._scale = torch.nn.Parameter(torch.zeros(1, d))
+        self.elu = nn.ELU()
+
+    @property
+    def scale(self):
+        """Transform bias to be non-negative
+
+        :return: non-negative bias
+        """
+        return self.elu(self._scale) + 1
+
+    def forward(self, x):
+        return x * self.scale
 
 
 class ScaleSwtich(nn.Module):
@@ -142,8 +164,13 @@ class BilinearAttention(nn.Module):
 
         # The transforms are shared by all scales
         # n * g -> n * d
-        self.q = NonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
-        self.k = NonNegLinear(d_in, n_heads, bias=False) # each row ...
+        self.q = NormNonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
+        # self.k = NonNegLinear(d_in, n_heads, bias=False) # each row ...
+        self.w_ego = NonNegScale(n_heads)
+        self.k_local = NonNegLinear(d_in, n_heads, bias=False)
+        self.k_regionals = nn.ModuleList(NonNegLinear(d_in, n_heads, bias=False)
+                                         for i in range(n_scales - 2))
+            
         self.v = NonNegLinear(n_heads, d_out, bias=False) # each column ..
         # self.v = TransposedNonNegLinear(self.q)
 
@@ -214,7 +241,13 @@ class BilinearAttention(nn.Module):
 
     def l2_reg(self):
         # No penalty on bias. Can't do this with weight_decay in optimizer
-        return self.q.weight.square().sum(dim=-2).mean() + self.k.weight.square().sum(dim=-2).mean() + self.v.weight.square().sum(dim=-2).mean()
+        temp = 0.
+        temp += self.q.weight.square().sum(dim=-2).mean()
+        temp += self.k_local.weight.square().sum(dim=-2).mean()
+        temp += sum([k_regional.weight.square().sum(dim=-2).mean() 
+                     for k_regional in self.k_regionals])
+        temp += self.v.weight.square().sum(dim=-2).mean()
+        return temp
 
     def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False):
         assert isinstance(regional_xs, list), "regional_xs should be a list of regional features."
@@ -230,12 +263,13 @@ class BilinearAttention(nn.Module):
 
         # Get embeddings for all cells and regions
         q_emb = self.q(masked_x) / (x.shape[1] ** .5)
-        k_local_emb = self.k(x) / (x.shape[1] ** .5)
-        k_regional_embs = [self.k(regional_x) / (x.shape[1] ** .5) for regional_x in regional_xs]
+        k_local_emb = self.k_local(x) / (x.shape[1] ** .5)
+        k_regional_embs = [self.k_regionals[i](regional_x) / (x.shape[1] ** .5) 
+                           for i, regional_x in enumerate(regional_xs)]
 
         # Get raw attention scores
         # scale_switch = self.switch() # h * s
-        ego_score = self.score_intrinsic(q_emb, q_emb) # * scale_switch[:, 0].reshape([1, self.n_heads])
+        ego_score = self.w_ego(self.score_intrinsic(q_emb, q_emb)) # * scale_switch[:, 0].reshape([1, self.n_heads])
         local_score = self.score_interactive(q_emb, k_local_emb, adj_list) #  * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
         regional_scores = [self.score_interactive(q_emb, k_regional_emb, regional_adj_list) 
                            for i, (k_regional_emb, regional_adj_list) in enumerate(zip(k_regional_embs, regional_adj_lists))]
@@ -290,7 +324,7 @@ class Steamboat(nn.Module):
         d_in = len(self.features)
         self.spatial_gather = BilinearAttention(d_in, n_heads, n_scales)
 
-    def masking(self, x: torch.Tensor, entry_masking_rate: float, feature_masking_rate: float):
+    def masking(self, x: torch.Tensor, xs, entry_masking_rate: float, feature_masking_rate: float):
         """Masking the dataset
 
         :param x: input data
@@ -305,7 +339,12 @@ class Steamboat(nn.Module):
         if feature_masking_rate > 0.:
             random_mask = torch.rand([1, x.shape[1]], device=x.device) < feature_masking_rate
             out_x.masked_fill_(random_mask, 0.)
-        return out_x
+            out_xs = []
+            for x in xs:
+                x = x.clone()
+                x.masked_fill_(random_mask, 0.)
+                out_xs.append(x)
+        return out_x, out_xs
 
     def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False):
         return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details)
@@ -314,7 +353,8 @@ class Steamboat(nn.Module):
             entry_masking_rate: float = 0.0, feature_masking_rate: float = 0.0,
             device:str = 'cuda', 
             *, 
-            flat_k_penalty: float = 0.0, flat_k_penalty_args=None, switch_l2_penalty: float = 0.0, weight_l2_penalty: float = 0.0,
+            flat_k_penalty: float = 0.0, flat_k_penalty_args=None, 
+            switch_l2_penalty: float = 0.0, weight_l2_penalty: float = 0.0,
             opt=None, opt_args=None, 
             loss_fun=None,
             max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
@@ -374,9 +414,10 @@ class Steamboat(nn.Module):
                 regional_adj_lists = [regional_adj_list.squeeze(0).to(device) for regional_adj_list in regional_adj_lists]
                 regional_xs = [regional_x.squeeze(0).to(device) for regional_x in regional_xs]
 
-                masked_x = self.masking(x, entry_masking_rate, feature_masking_rate)
+                masked_x, masked_xs = self.masking(x, regional_xs, entry_masking_rate, feature_masking_rate)
 
-                x_recon = self.forward(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False)
+                x_recon = self.forward(adj_list, masked_x, masked_x, 
+                                       regional_adj_lists, masked_xs, get_details=False)
                 
                 loss = criterion(x_recon, x)
                 total_loss += loss.item()

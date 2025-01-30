@@ -42,7 +42,7 @@ class SteamboatDataset(Dataset):
         return SteamboatDataset(new_data, sparse_graph=self.sparse_graph)
     
 
-def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, log_norm=True) -> list[sc.AnnData]:
+def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, norm=True, log1p=True, scale=True, renorm=False) -> list[sc.AnnData]:
     """Preprocess a list of AnnData objects
 
     :param adatas: A list of `SCANPY AnnData`
@@ -54,10 +54,15 @@ def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, log_norm=True) -> l
         warnings.simplefilter("ignore")
         for i in tqdm(range(len(adatas))):
             adata = adatas[i]
-            if log_norm:
+            if norm:
                 sc.pp.normalize_total(adata)
+            if log1p:
                 sc.pp.log1p(adata)
-            # sc.pp.scale(adata, zero_center=False)
+            if scale:
+                sc.pp.scale(adata, zero_center=False)
+            if renorm:
+                sc.pp.normalize_total(adata, target_sum=100)
+            
             sq.gr.spatial_neighbors(adata, n_neighs=n_neighs)
     return adatas
 
