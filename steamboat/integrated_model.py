@@ -61,6 +61,7 @@ class NormNonNegLinear(nn.Module):
         super().__init__()
         self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 5)
         self.sigmoid = nn.Sigmoid()
+        self.elu = nn.ELU()
         self.eps = eps
         if bias:
             raise NotImplementedError()
@@ -71,7 +72,8 @@ class NormNonNegLinear(nn.Module):
 
         :return: transformed weight matrix
         """
-        temp = self.sigmoid(self._weight)
+        # temp = self.sigmoid(self._weight)
+        temp = self.elu(self._weight) + 1
         return temp / (temp.sum(axis=1, keepdim=True) + self.eps)
 
     def forward(self, x):
