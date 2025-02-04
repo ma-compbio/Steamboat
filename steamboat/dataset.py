@@ -42,7 +42,7 @@ class SteamboatDataset(Dataset):
         return SteamboatDataset(new_data, sparse_graph=self.sparse_graph)
     
 
-def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, norm=True, log1p=True, scale=True, renorm=False) -> list[sc.AnnData]:
+def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, norm=True, log1p=True, scale=False, renorm=False) -> list[sc.AnnData]:
     """Preprocess a list of AnnData objects
 
     :param adatas: A list of `SCANPY AnnData`
@@ -59,14 +59,14 @@ def prep_adatas(adatas: list[sc.AnnData], n_neighs: int = 8, norm=True, log1p=Tr
             if log1p:
                 sc.pp.log1p(adata)
             if scale:
-                sc.pp.scale(adata, zero_center=False)
+                sc.pp.scale(adata, max_value=10)
             if renorm:
-                sc.pp.normalize_total(adata, target_sum=100)
+                sc.pp.normalize_total(adata, target_sum=100, zero_center=False)
             
             sq.gr.spatial_neighbors(adata, n_neighs=n_neighs)
     return adatas
 
-def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = None, 
+def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = None, obsm_key = None,
                  regional_obs: str | list[str] = None) -> SteamboatDataset:
     """Create a PyTorch Dataset from a list of adata
     The input data should be a list of AnnData that contains 1. raw counts or normalized counts
@@ -108,10 +108,13 @@ def make_dataset(adatas: list[sc.AnnData], sparse_graph=True, mask_var: str = No
         data_dict = {}
 
         # Gather expression profile
-        X = adata.X
+        if obsm_key is None:
+            X = adata.X
+        else:
+            X = adata.obsm[obsm_key]
         if mask_var:
             X = X[:, adata.var[mask_var]]
-        if isinstance(adata.X, sp.sparse.spmatrix):
+        if isinstance(X, sp.sparse.spmatrix):
             data_dict['X'] = torch.from_numpy(X.astype(np.float32).toarray())
         else:
             data_dict['X'] = torch.from_numpy(X.astype(np.float32))

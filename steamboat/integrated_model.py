@@ -21,7 +21,7 @@ class NonNegLinear(nn.Module):
         :raises NotImplementedError: when bias is True
         """
         super().__init__()
-        self._weight = torch.nn.Parameter(torch.zeros(d_out, d_in) - 2)
+        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) - 3)
         self.elu = nn.ELU()
         if bias:
             raise NotImplementedError()
@@ -59,7 +59,7 @@ class NormNonNegLinear(nn.Module):
         :raises NotImplementedError: when bias is True
         """
         super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 5)
+        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 3)
         self.sigmoid = nn.Sigmoid()
         self.elu = nn.ELU()
         self.eps = eps
@@ -72,9 +72,9 @@ class NormNonNegLinear(nn.Module):
 
         :return: transformed weight matrix
         """
-        # temp = self.sigmoid(self._weight)
-        temp = self.elu(self._weight) + 1
-        return temp / (temp.sum(axis=1, keepdim=True) + self.eps)
+        temp = self.sigmoid(self._weight)
+        # temp = self.elu(self._weight) + 1
+        return temp # / (temp.sum(axis=1, keepdim=True) + self.eps)
 
     def forward(self, x):
         return x @ self.weight.T
@@ -122,6 +122,26 @@ class NonNegScale(nn.Module):
     def forward(self, x):
         return x * self.scale
 
+class NonNegScale3(nn.Module):
+    def __init__(self, d) -> None:
+        """Non-negative bias layer (i.e., add a non-negative vector to the output)
+
+        :param d: number of input/output features
+        """
+        super().__init__()
+        self._scale = torch.nn.Parameter(torch.zeros(1, d, 1))
+        self.elu = nn.ELU()
+
+    @property
+    def scale(self):
+        """Transform bias to be non-negative
+
+        :return: non-negative bias
+        """
+        return self.elu(self._scale) + 1
+
+    def forward(self, x):
+        return x * self.scale
 
 class ScaleSwtich(nn.Module):
     def __init__(self, n_heads, n_scales) -> None:
@@ -166,13 +186,19 @@ class BilinearAttention(nn.Module):
 
         # The transforms are shared by all scales
         # n * g -> n * d
-        self.q = NormNonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
+        self.q = NonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
         # self.k = NonNegLinear(d_in, n_heads, bias=False) # each row ...
-        self.w_ego = NonNegScale(n_heads)
+        
         self.k_local = NonNegLinear(d_in, n_heads, bias=False)
         self.k_regionals = nn.ModuleList(NonNegLinear(d_in, n_heads, bias=False)
                                          for i in range(n_scales - 2))
             
+        self.w_ego = NonNegScale(n_heads)
+        self.w_local = NonNegScale3(n_heads)
+        self.w_global = NonNegScale3(n_heads)
+
+        self.tanh = nn.Tanh() # for clamping of the values
+
         self.v = NonNegLinear(n_heads, d_out, bias=False) # each column ..
         # self.v = TransposedNonNegLinear(self.q)
 
@@ -182,18 +208,27 @@ class BilinearAttention(nn.Module):
         self.k_local_emb = None
         self.k_regional_embs = None
 
+        # For debugging
+        # self.attn_shortcut = torch.nn.Sequential(torch.nn.Linear(d_in, n_heads), 
+        #                                          torch.nn.Tanh(), 
+        #                                          torch.nn.Linear(n_heads, n_heads),
+        #                                          torch.nn.Tanh())
+        # self.v_shortcut = torch.nn.Linear(n_heads, d_out)
+
         self.cosine_similarity = nn.CosineSimilarity(dim=-2)
 
-    def score_intrinsic(self, q_emb, k_emb):
+    def score_intrinsic(self, q_emb, k_emb, activation=None):
         """Score intrinsic factors. No attention to other cells/environment.
 
         :param q_emb: query scores
         :return: ego scores
         """
         scores = q_emb * k_emb
+        if activation is not None:
+            scores = activation(scores)
         return scores
 
-    def score_interactive(self, q_emb, k_emb, adj_list):
+    def score_interactive(self, q_emb, k_emb, adj_list, activation=None):
         """Score interactive factors. Attention to other cells/environment.
 
         :param q_emb: query scores
@@ -204,6 +239,8 @@ class BilinearAttention(nn.Module):
         q = q_emb[adj_list[1, :], :] # n * g ---v-> kn * d
         k = k_emb[adj_list[0, :], :] # n * g ---u-> kn * d
         scores = q * k # nk * d
+        if activation is not None:
+            scores = activation(scores)
         nominal_k = scores.shape[0] // q_emb.shape[0]
         if adj_list.shape[0] == 3: # masked for unequal neighbors
             scores.masked_fill_((adj_list[2, :] == 0).reshape([-1, 1]), 0.)
@@ -215,9 +252,9 @@ class BilinearAttention(nn.Module):
         # Normalize by the actual number of neighbors
         if adj_list.shape[0] == 3:
             actual_k = adj_list[2, :].reshape(q_emb.shape[0], nominal_k).sum(axis=1) # TODO: memorize this
-            scores /= actual_k[:, None, None] 
+            scores = scores / actual_k[:, None, None] 
         else:
-            scores /= nominal_k
+            scores = scores / nominal_k
 
         return scores
 
@@ -264,16 +301,16 @@ class BilinearAttention(nn.Module):
             masked_x = x
 
         # Get embeddings for all cells and regions
-        q_emb = self.q(masked_x) / (x.shape[1] ** .5)
-        k_local_emb = self.k_local(x) / (x.shape[1] ** .5)
-        k_regional_embs = [self.k_regionals[i](regional_x) / (x.shape[1] ** .5) 
+        q_emb = self.q(masked_x) / x.shape[1]
+        k_local_emb = self.k_local(x) / x.shape[1]
+        k_regional_embs = [self.k_regionals[i](regional_x) / x.shape[1] 
                            for i, regional_x in enumerate(regional_xs)]
 
         # Get raw attention scores
         # scale_switch = self.switch() # h * s
         ego_score = self.w_ego(self.score_intrinsic(q_emb, q_emb)) # * scale_switch[:, 0].reshape([1, self.n_heads])
-        local_score = self.score_interactive(q_emb, k_local_emb, adj_list) #  * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
-        regional_scores = [self.score_interactive(q_emb, k_regional_emb, regional_adj_list) 
+        local_score = (self.score_interactive(q_emb, k_local_emb, adj_list)) #  * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
+        regional_scores = [(self.score_interactive(q_emb, k_regional_emb, regional_adj_list))
                            for i, (k_regional_emb, regional_adj_list) in enumerate(zip(k_regional_embs, regional_adj_lists))]
         # regional_scores = [self.score_interactive(q_emb, k_regional_emb, adj_list) * scale_switch[:, i + 2].reshape([1, self.n_heads, 1]) for i, k_regional_emb in enumerate(k_regional_embs)]
 
@@ -284,7 +321,10 @@ class BilinearAttention(nn.Module):
         normalization_factor = sum_score.sum(axis=-1, keepdim=True) + 1e-9 # n * 1
 
         sum_attn = sum_score / normalization_factor
-        res = self.bias(self.v(sum_attn))
+        # res = self.bias(self.v(sum_attn))
+        # sum_attn = self.attn_shortcut(x)
+        res = self.v(sum_attn)
+        # res = self.v_shortcut(sum_attn)
 
         self.q_emb = q_emb
         self.k_local_emb = k_local_emb
@@ -294,12 +334,14 @@ class BilinearAttention(nn.Module):
             ego_attnp = ego_score / normalization_factor
             local_attnp = local_score / normalization_factor[:, :, None]
             regional_attnps = [regional_score / normalization_factor[:, :, None] for regional_score in regional_scores]
+            # regional_attnps = [regional_score for regional_score in regional_scores]
 
             ego_attnm = ego_attnp
             local_attnm = local_attnp.sum(axis=-1)
             regional_attnms = [regional_attnp.sum(axis=-1) for regional_attnp in regional_attnps]
 
             return res, {
+                'attn': sum_attn,
                 'embq': q_emb,
                 'embk': (k_local_emb, k_regional_embs),
                 'attnp': (ego_attnp, local_attnp, regional_attnps),
@@ -355,8 +397,6 @@ class Steamboat(nn.Module):
             entry_masking_rate: float = 0.0, feature_masking_rate: float = 0.0,
             device:str = 'cuda', 
             *, 
-            flat_k_penalty: float = 0.0, flat_k_penalty_args=None, 
-            switch_l2_penalty: float = 0.0, weight_l2_penalty: float = 0.0,
             opt=None, opt_args=None, 
             loss_fun=None,
             max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
@@ -385,11 +425,8 @@ class Steamboat(nn.Module):
         loader = DataLoader(dataset, batch_size=1, shuffle=True)
         parameters = self.parameters()
 
-        if flat_k_penalty_args is None:
-            flat_k_penalty_args = {}
-
         if loss_fun is None:
-            criterion = nn.MSELoss()
+            criterion = nn.MSELoss(reduction='sum')
         else:
             criterion = loss_fun
 
@@ -406,9 +443,14 @@ class Steamboat(nn.Module):
 
         cnt = 0
         best_loss = np.inf
+        n_cells = 0
+        n_genes = 0
+        for x, adj_list, regional_xs, regional_adj_lists in loader:
+            n_cells += x.shape[0]
+            n_genes = x.shape[1]
         for epoch in range(max_epoch):
-            total_loss = 0.
-            total_penalty = 0.
+            avg_loss = 0.
+            optimizer.zero_grad()
             for x, adj_list, regional_xs, regional_adj_lists in loader:
                 # Send everything to required device
                 adj_list = adj_list.squeeze(0).to(device)
@@ -421,46 +463,44 @@ class Steamboat(nn.Module):
                 x_recon = self.forward(adj_list, masked_x, masked_x, 
                                        regional_adj_lists, masked_xs, get_details=False)
                 
-                loss = criterion(x_recon, x)
-                total_loss += loss.item()
+                # loss = criterion(x_recon, x)
+                # total_loss = loss + total_loss
+                loss = criterion(x_recon, x) / n_cells / n_genes
+                avg_loss += loss.item()
+                loss.backward()
+                # n_cells += x.shape[0]
                 # loss = loss * x.shape[0] / 10000 # handle size differences among datasets; larger dataset has higher weight
 
-                reg = 0.
-                if flat_k_penalty > 0.:
-                    reg += self.spatial_gather.flat_k_penalty(**flat_k_penalty_args) * flat_k_penalty
-                    total_penalty += reg.item()
+                # reg = 0.
+                # if flat_k_penalty > 0.:
+                #     reg += self.spatial_gather.flat_k_penalty(**flat_k_penalty_args) * flat_k_penalty
+                #     total_penalty += reg.item()
                 # if switch_l2_penalty > 0.:
                 #     reg += self.spatial_gather.switch.l2_reg() * switch_l2_penalty
                 #     total_penalty += reg.item()
-                if weight_l2_penalty > 0.:
-                    reg += self.spatial_gather.l2_reg() * weight_l2_penalty
-                    total_penalty += reg.item()
+                # if weight_l2_penalty > 0.:
+                #     reg += self.spatial_gather.l2_reg() * weight_l2_penalty
+                #     total_penalty += reg.item()
+            optimizer.step()
 
-                optimizer.zero_grad()
-                (loss + reg).backward()
-                optimizer.step()
-
-            avg_loss = total_loss / len(loader)
-            avg_penalty = total_penalty / len(loader)
-
-            if best_loss - (avg_loss + avg_penalty) < stop_eps:
+            if best_loss - avg_loss < stop_eps:
                 cnt += 1
             else:
                 cnt = 0
             if report_per >= 0 and cnt >= stop_tol:
-                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}, reg {avg_penalty:.6f}")
+                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}")
                 logger.info(f"Stopping criterion met.")
                 break
             elif report_per > 0 and (epoch % report_per) == 0:
-                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}, reg {avg_penalty:.6f}")
-            best_loss = min(best_loss, avg_loss + avg_penalty)
+                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}")
+            best_loss = min(best_loss, avg_loss)
 
             # writer.add_scalar('Train_Loss', train_loss / len(loader), epoch)
             # writer.add_scalar('Learning_Rate', optimizer.state_dict()["param_groups"][0]["lr"], epoch)
             # scheduler.step()
         else:
             logger.info(f"Maximum iterations reached.")
-        self.fit_loss = avg_loss
+            
         self.eval()
         return self
 
