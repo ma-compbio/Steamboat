@@ -694,10 +694,11 @@ def leiden(adata: sc.AnnData, resolution: float = 1., *,
     
 
 def segment(adata: sc.AnnData, resolution: float = 1., *,
-            embedding_key: str = 'steamboat_emb_connectivities',
             key_added: str = 'steamboat_spatial_domain',
-            obsp_summary: str = 'steamboat_summary_connectivities',
-            obsp_combined: str = 'steamboat_combined_connectivities', 
+            key_added_pairwise: str = 'pairwise',
+            key_added_similarity: str = 'similarity', 
+            key_added_combined: str = 'combined', 
+            n_prop: int = 3,
             spatial_graph_threshold: float = 0.0,
             leiden_kwargs: dict = None):
     """Spatial domain segmentation using Steamboat embeddings and graphs
@@ -715,22 +716,28 @@ def segment(adata: sc.AnnData, resolution: float = 1., *,
     if leiden_kwargs is None:
         leiden_kwargs = {}
 
-    temp = None
+    adata.obsm['local_attn_std'] = adata.obsm['local_attn'] / adata.obsm['local_attn'].std(axis=0, keepdims=True)
+    sc.pp.neighbors(adata, use_rep='local_attn_std', key_added=key_added_similarity, metric='euclidean')
+
+    temp = 0
     j = 0
     while f'local_attn_{j}' in adata.obsp:
-        if temp is None:
-            temp = adata.obsp[f'local_attn_{j}'].copy() ** 4
-        else:
-            temp += adata.obsp[f'local_attn_{j}'] ** 4
+        temp += adata.obsp[f'local_attn_{j}']
         j += 1
-    temp = temp.sqrt().sqrt()
+
+    temp = temp ** n_prop
+    temp = temp.power(1/n_prop)
+
     temp.data /= temp.data.max()
     temp.data[temp.data < spatial_graph_threshold] = 0
     temp.eliminate_zeros()
-    adata.obsp[obsp_summary] = temp
-    adata.obsp[obsp_combined] = adata.obsp[embedding_key] * (adata.obsp[obsp_summary]) + (adata.obsp[obsp_summary])
-    adata.obsp[obsp_combined].eliminate_zeros() 
-    return sc.tl.leiden(adata, obsp=obsp_combined, key_added=key_added, resolution=resolution, **leiden_kwargs)
+
+    adata.obsp[key_added_pairwise + '_connectivities'] = temp
+    adata.obsp[key_added_combined + '_connectivities'] = (adata.obsp[key_added_pairwise + '_connectivities'] + 
+                                                          adata.obsp[key_added_similarity + '_connectivities'])
+    adata.obsp[key_added_combined + '_connectivities'].eliminate_zeros() 
+    return sc.tl.leiden(adata, obsp=key_added_combined + '_connectivities', 
+                        key_added=key_added, resolution=resolution, **leiden_kwargs)
 
 
 def plot_transforms_combined(model, top=3, reorder=False, figsize='auto'):

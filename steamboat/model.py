@@ -21,7 +21,7 @@ class NonNegLinear(nn.Module):
         :raises NotImplementedError: when bias is True
         """
         super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
+        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) - 3)
         self.elu = nn.ELU()
         if bias:
             raise NotImplementedError()
@@ -36,81 +36,7 @@ class NonNegLinear(nn.Module):
 
     def forward(self, x):
         return x @ self.weight.T
-    
-class NormNonNegLinear(nn.Module):
-    def __init__(self, d_in, d_out, bias) -> None:
-        """_summary_
 
-        :param d_in: number of input features
-        :param d_out: number of output features
-        :param bias: umimplemented
-        :raises NotImplementedError: when bias is True
-        """
-        super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) / 10 - 2)
-        self.sigmoid = nn.Sigmoid()
-        if bias:
-            raise NotImplementedError()
-
-    @property
-    def weight(self):
-        """transform weight matrix to be non-negative
-
-        :return: transformed weight matrix
-        """
-        temp =  self.sigmoid(self._weight)
-        return temp / temp.sum()
-
-    def forward(self, x):
-        return x @ self.weight.T
-
-class ReverseNonNegLinear:
-    def __init__(self, bnnl):
-        """A wrapper for reversed bidirectional non-negative linear layer
-
-        :param bnnl: A bidirectional non-negative linear layer
-        """
-        self.bnnl = bnnl
-    
-    @property
-    def weight(self):
-        return self.bnnl.thgiew
-
-    def forward(self, x):
-        return self.bnnl.rofward(x)
-    
-    def __call__(self, x):
-        return self.forward(x)
-
-class BidirNonNegLinear(nn.Module):
-    def __init__(self, d_in, d_out, bias) -> None:
-        """Bidirectional non-negative linear layer for orthogonalization
-
-        :param d_in: number of input features
-        :param d_out: number of output features
-        :param bias: unimplemented
-        :raises NotImplementedError: when bias is True
-        """
-        super().__init__()
-        self._weight = torch.nn.Parameter(torch.randn(d_out, d_in) - 2)
-        self._shift = torch.nn.Parameter(torch.zeros(1, d_in))
-        self.elu = nn.ELU()
-        if bias:
-            raise NotImplementedError()
-
-    @property
-    def weight(self):
-        return self.elu(self._weight) + 1
-
-    @property
-    def thgiew(self):
-        return (self.elu(self._weight) + 1) * (self.elu(self._shift) + 1)
-
-    def forward(self, x):
-        return x @ self.weight.T
-    
-    def rofward(self, x):
-        return x @ self.thgiew
     
 class NonNegBias(nn.Module):
     def __init__(self, d) -> None:
@@ -132,233 +58,220 @@ class NonNegBias(nn.Module):
 
     def forward(self, x):
         return x + self.bias
+    
+class NonNegScale(nn.Module):
+    def __init__(self, d) -> None:
+        """Non-negative bias layer (i.e., add a non-negative vector to the output)
+
+        :param d: number of input/output features
+        """
+        super().__init__()
+        self._scale = torch.nn.Parameter(torch.zeros(1, d))
+        self.elu = nn.ELU()
+
+    @property
+    def scale(self):
+        """Transform bias to be non-negative
+
+        :return: non-negative bias
+        """
+        return self.elu(self._scale) + 1
+
+    def forward(self, x):
+        return x * self.scale
 
 
 class BilinearAttention(nn.Module):
-    def __init__(self, d_in, d_ego, d_local, d_global, d_out=None):
+    def __init__(self, d_in, n_heads, n_scales=2, d_out=None):
         """Bilinear attention layer
 
         :param d_in: number of input features
-        :param d_ego: number of ego factors (deprecated; use local factors instead)
-        :param d_local: number of local factors
-        :param d_global: number of global factors
+        :param d_factors: number of factors
         :param d_out: _description_, defaults to None (meaning d_out = d_in)
         """
         super(BilinearAttention, self).__init__()
         if d_out is None:
             d_out = d_in
         self.d_in = d_in
-        self.d_ego = d_ego
-        self.d_local = d_local
-        self.d_global = d_global
+        self.n_heads = n_heads
+        self.n_scales = n_scales
+
+        # self.switch = ScaleSwtich(n_heads, n_scales=2)
 
         # A bias layer for the output to account for any "DC" component
         self.bias = NonNegBias(d_out)
 
-        # Ego factors (again, deprecated)
-        self.qk_ego = nn.Linear(d_in, d_ego, bias=False)
-        self.v_ego = BidirNonNegLinear(d_ego, d_out, bias=False)
+        # The transforms are shared by all scales
+        # n * g -> n * d
+        self.q = NonNegLinear(d_in, n_heads, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
+        # self.k = NonNegLinear(d_in, n_heads, bias=False) # each row ...
+        
+        self.k_local = NonNegLinear(d_in, n_heads, bias=False)
+        self.k_regionals = nn.ModuleList(NonNegLinear(d_in, n_heads, bias=False)
+                                         for i in range(n_scales - 2))
+            
+        self.w_ego = NonNegScale(n_heads)
 
-        # Local factors
-        self.q_local = NormNonNegLinear(d_in, d_local, bias=False) # each row of the weight matrix is a metagene (x -> x @ w.T)
-        self.k_local = NonNegLinear(d_in, d_local, bias=False) # each row ...
-        self.v_local = NonNegLinear(d_local, d_out, bias=False) # each column ..
+        self.tanh = nn.Tanh() # for clamping of the values
 
-        # Global factors
-        self.q_global = NormNonNegLinear(d_in, d_global, bias=False) # each row ..
-        self.k_global = NonNegLinear(d_in, d_global, bias=False) # each row ..
-        self.v_global = NonNegLinear(d_global, d_out, bias=False) # each column ..
+        self.v = NonNegLinear(n_heads, d_out, bias=False) # each column ..
+        # self.v = TransposedNonNegLinear(self.q)
 
-        # penalty / regularlization
-        self.cos_sim = nn.CosineSimilarity(dim=1) # each row is a metagene
-        self.cell_cos_sim = nn.CosineSimilarity(dim=0) # each col is a list of cells
         # remember some variables during forward
+        # Note: with gradient; detach before use when gradient is not needed
+        self.q_emb = None
         self.k_local_emb = None
-        self.q_local_emb = None
+        self.k_regional_embs = None
 
-    def local_cell_cos(self):
-        """Cosine similarity of k & q embeddings of cells (over all cells)
+        # For debugging
+        # self.attn_shortcut = torch.nn.Sequential(torch.nn.Linear(d_in, n_heads), 
+        #                                          torch.nn.Tanh(), 
+        #                                          torch.nn.Linear(n_heads, n_heads),
+        #                                          torch.nn.Tanh())
+        # self.v_shortcut = torch.nn.Linear(n_heads, d_out)
 
-        :return: the cell-wise cosine similarity
+        self.cosine_similarity = nn.CosineSimilarity(dim=-2)
+
+    def score_intrinsic(self, q_emb, k_emb, activation=None):
+        """Score intrinsic factors. No attention to other cells/environment.
+
+        :param q_emb: query scores
+        :return: ego scores
         """
-        temp = self.cell_cos_sim(self.k_local_emb, self.q_local_emb).sum()
-        # self.k_local_emb = None
-        # self.q_local_emb = None
+        scores = q_emb * k_emb
+        if activation is not None:
+            scores = activation(scores)
+        return scores
+
+    def score_interactive(self, q_emb, k_emb, adj_list, activation=None):
+        """Score interactive factors. Attention to other cells/environment.
+
+        :param q_emb: query scores
+        :param k_emb: key scores
+        :param adj_list: adjacency list
+        :return: interactive scores for short or long range interaction
+        """
+        q = q_emb[adj_list[1, :], :] # n * g ---v-> kn * d
+        k = k_emb[adj_list[0, :], :] # n * g ---u-> kn * d
+        scores = q * k # nk * d
+        if activation is not None:
+            scores = activation(scores)
+        nominal_k = scores.shape[0] // q_emb.shape[0]
+        if adj_list.shape[0] == 3: # masked for unequal neighbors
+            scores.masked_fill_((adj_list[2, :] == 0).reshape([-1, 1]), 0.)
+
+        # reshape
+        scores = scores.reshape([q_emb.shape[0], nominal_k, self.n_heads]) # n * k * d 
+        scores = scores.transpose(-1, -2)
+
+        # Normalize by the actual number of neighbors
+        if adj_list.shape[0] == 3:
+            actual_k = adj_list[2, :].reshape(q_emb.shape[0], nominal_k).sum(axis=1) # TODO: memorize this
+            scores = scores / actual_k[:, None, None] 
+        else:
+            scores = scores / nominal_k
+
+        return scores
+
+    def flat_k_penalty(self, kind: Literal['entropy', 'cosine', 'variance']):
+        """Scoring how homogeneous the k_emb is over all cells.
+        The score is the highest when the k_emb is the same for all cells. 
+        This will mean no difference between the local and ego attention.
+
+        :return: entropy penalty
+        """
+        if kind == 'entropy':
+            # Considering the scores of all cells, a higher entropy means more flat distribution
+            probs = self.k_local_emb / self.k_local_emb.sum(dim=-2, keepdim=True)
+            penalty = -(probs * torch.log(probs + 1e-9)).sum(dim=-2).mean()
+        if kind == 'cosine':
+            # More similar to an all-1 vector means more flat distribution
+            penalty = self.cosine_similarity(self.k_local_emb, torch.ones_like(self.k_local_emb)).mean()
+        if kind == 'variance':
+            # LESS variance means more flat distribution
+            probs = self.k_local_emb / self.k_local_emb.sum(dim=-2, keepdim=True)
+            penalty = -probs.var(dim=-2).mean()
+        return penalty
+
+    def l2_reg(self):
+        # No penalty on bias. Can't do this with weight_decay in optimizer
+        temp = 0.
+        temp += self.q.weight.square().sum(dim=-2).mean()
+        temp += self.k_local.weight.square().sum(dim=-2).mean()
+        temp += sum([k_regional.weight.square().sum(dim=-2).mean() 
+                     for k_regional in self.k_regionals])
+        temp += self.v.weight.square().sum(dim=-2).mean()
         return temp
 
-    def local_cos(self):
-        """Cosine similarity of q & v metagenes (over all genes)
-
-        :return: the gene-wise cosine similarity
-        """
-        return self.cos_sim(self.q_local.weight, self.v_local.weight.T).sum() # response v should be different from receiver q
-    
-    def global_cos(self):
-        """Cosine similarity of q & v and q & k metagenes (over all genes)
-
-        :return: the gene-wise cosine similarity
-        """
-        return (self.cos_sim(self.q_global.weight, self.v_global.weight.T).sum() + # response v should be different from receiver q
-                self.cos_sim(self.q_global.weight, self.k_global.weight).sum())  
-
-    def othorgonality(self, m):
-        """Orthogonality penalty for a matrix
-
-        :param m: _description_
-        :return: _description_
-        """
-        temp = m @ m.transpose(0, 1)
-        eye = torch.eye(m.shape[0]).to(m.get_device())
-        return (temp - eye).pow(2.0).sum()
-    
-    def q_othorgonality(self):
-        return self.othorgonality(self.q_local.weight) + self.othorgonality(self.q_global.weight) + self.othorgonality(self.v_ego.weight2.transpose(0, 1))
-
-    def score_local(self, adj_matrix, x, masked_x=None):
-        if masked_x is None:
-            masked_x = x
-        # q_local = self.v_local.rofward(masked_x) # n * g -> n * d
-        q_local = self.q_local(masked_x)
-        k_local = self.k_local(x) # n * g -> n * d
-        # (d * n * 1) x (d * 1 * n) -> d * n * n
-        local_scores = q_local.transpose(-1, -2)[:, :, None] * k_local.transpose(-1, -2)[:, None, :] / x.shape[1] / x.shape[1]
-        local_scores.masked_fill_(~adj_matrix, -1e9)
-        local_scores = local_scores.transpose(-2, -3) # n * d * n
-        self.k_local_emb = k_local
-        self.q_local_emb = q_local
-        return local_scores
-
-    def score_local_sparse(self, adj_list, x, masked_x=None):
-        if masked_x is None:
-            masked_x = x
-        # q_local = self.v_local.rofward(masked_x) # n * g -> n * d
-        q_local = self.q_local(masked_x)
-        k_local = self.k_local(x) # n * g -> n * d
-        self.k_local_emb = k_local
-        self.q_local_emb = q_local
-        q_local = q_local[adj_list[1, :], :] # n * g --v-> kn * d
-        k_local = k_local[adj_list[0, :], :] # n * g --u-> kn * d
-        local_scores = (q_local * k_local) # nk * d
-        if adj_list.shape[0] == 3: # masked for unequal neighbors
-            local_scores.masked_fill_((adj_list[2, :] == 0).reshape([-1, 1]), 0.)
-        n = local_scores.shape[0] // x.shape[0]
-        local_scores = local_scores.reshape([x.shape[0], n, self.d_local]) / x.shape[1] / x.shape[1] # n * k * d 
-        local_scores = local_scores.transpose(-1, -2)
-        return local_scores
-
-    def score_global(self, x, masked_x=None, x_bar=None):
-        if masked_x is None:
-            masked_x = x
-        if x_bar is None:
-            x_bar = torch.mean(x, axis=0, keepdim=True)
-        # q_global = self.v_global.rofward(masked_x) # n * g -> n * d
-        q_global = self.q_global(masked_x)
-        k_global = self.k_global(x_bar)    # m * g -> m * d
-        global_scores = q_global.transpose(-1, -2)[:, :, None] * k_global.transpose(-1, -2)[:, None, :] / x.shape[1] / x.shape[1]
-        global_scores = global_scores.transpose(-2, -3) # n * d * m
-        self.k_global_emb = k_global
-        self.q_global_emb = q_global
-        return global_scores
-
-    def forward(self, adj_matrix, x, masked_x=None, x_bar=None, sparse_graph=True, get_details=False):
-        if x_bar is None:
-            x_bar = torch.mean(x, axis=0, keepdim=True) # in which case, m := 1
-            # Note: x_bar can have multiple pseudobulks.
+    def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False):
+        assert isinstance(regional_xs, list), "regional_xs should be a list of regional features."
+        if regional_adj_lists is None:
+            regional_adj_lists = []
+        if regional_xs is None:
+            regional_xs = []
+        assert len(regional_adj_lists) == len(regional_xs)
+        assert self.n_scales == len(regional_xs) + 2
 
         if masked_x is None:
             masked_x = x
 
-        ego_emb = self.qk_ego(masked_x)
-        ego_scores = (ego_emb / x.shape[1]) ** 2
-        # ego_scores = (self.v_ego.rofward(masked_x) / x.shape[1]) ** 2
+        # Get embeddings for all cells and regions
+        q_emb = self.q(masked_x) / x.shape[1]
+        k_local_emb = self.k_local(x) / x.shape[1]
+        k_regional_embs = [self.k_regionals[i](regional_x) / x.shape[1] 
+                           for i, regional_x in enumerate(regional_xs)]
 
-        if sparse_graph:
-            local_scores = self.score_local_sparse(adj_matrix, x, masked_x)
-        else:
-            local_scores = self.score_local(adj_matrix, x, masked_x)
+        # Get raw attention scores
+        # scale_switch = self.switch() # h * s
+        ego_score = self.w_ego(self.score_intrinsic(q_emb, q_emb)) # * scale_switch[:, 0].reshape([1, self.n_heads])
+        local_score = (self.score_interactive(q_emb, k_local_emb, adj_list)) #  * scale_switch[:, 1].reshape([1, self.n_heads, 1]) # n * h * m
+        regional_scores = [(self.score_interactive(q_emb, k_regional_emb, regional_adj_list))
+                           for i, (k_regional_emb, regional_adj_list) in enumerate(zip(k_regional_embs, regional_adj_lists))]
+        # regional_scores = [self.score_interactive(q_emb, k_regional_emb, adj_list) * scale_switch[:, i + 2].reshape([1, self.n_heads, 1]) for i, k_regional_emb in enumerate(k_regional_embs)]
 
-        global_scores = self.score_global(x, masked_x, x_bar)
+        # Normalize attention scores
+        sum_local_score = torch.sum(local_score, dim=-1)
+        sum_regional_scores = [torch.sum(regional_score, dim=-1) for regional_score in regional_scores]
+        sum_score = ego_score + sum_local_score + sum(sum_regional_scores) # n * h
+        normalization_factor = sum_score.sum(axis=-1, keepdim=True) + 1e-9 # n * 1
 
-        max_list = []
-        if self.d_ego > 0:
-            max_ego_score, _ = torch.max(ego_scores, dim=1, keepdim=True)
-            # max_list.append(max_ego_score)
-        if self.d_local > 0:
-            max_local_score, _ = torch.max(local_scores.reshape((local_scores.shape[0], -1)), dim=1, keepdim=True)
-            max_list.append(max_local_score)
-        if self.d_global > 0:
-            max_global_score, _ = torch.max(global_scores.reshape((global_scores.shape[0], -1)), dim=1, keepdim=True)
-            max_list.append(max_global_score)
-        
-        max_score, _ = torch.max(torch.cat(max_list, dim=1), dim=1, keepdim=True)
+        sum_attn = sum_score / normalization_factor
+        # res = self.bias(self.v(sum_attn))
+        # sum_attn = self.attn_shortcut(x)
+        res = self.v(sum_attn)
+        # res = self.v_shortcut(sum_attn)
 
-        sum_exp_score = 1e-3
-        if self.d_ego > 0:
-            exp_ego_scores = ego_scores # torch.exp(ego_scores - max_score)
-            sum_exp_score += torch.sum(exp_ego_scores, dim=-1, keepdim=True)
-        if self.d_local > 0:
-            exp_local_scores = local_scores # torch.exp(local_scores - max_score[:, :, None])
-            exp_local_scores = torch.sum(exp_local_scores, dim=-1)
-            sum_exp_score += torch.sum(exp_local_scores, dim=-1, keepdim=True)
-        if self.d_global > 0:
-            exp_global_scores = global_scores # torch.exp(global_scores - max_score[:, :, None])
-            exp_global_scores = torch.sum(exp_global_scores, dim=-1)
-            sum_exp_score += torch.sum(exp_global_scores, dim=-1, keepdim=True)
+        self.q_emb = q_emb
+        self.k_local_emb = k_local_emb
+        self.k_regional_embs = k_regional_embs
 
-        # print(local_scores.shape, exp_local_scores.shape, sum_exp_score.shape)
-        # print(global_scores.shape, exp_global_scores.shape, sum_exp_score.shape)
-        res = 0.
-        if self.d_ego > 0:
-            ego_attn = exp_ego_scores / sum_exp_score
-            ego_res = self.v_ego(ego_attn)
-            res += ego_res
-        else:
-            ego_scores = None
-            ego_attn = None
-            ego_res = None
-
-        if self.d_local > 0:
-            if get_details:
-                local_norm_attn = local_scores / sum_exp_score[:, :, None]
-            local_attn = exp_local_scores / sum_exp_score
-            local_res = self.v_local(local_attn)
-            res += local_res
-        else:
-            local_norm_attn = None
-            local_attn = None
-            local_res = None
-
-        if self.d_global > 0:
-            if get_details:
-                global_norm_attn = global_scores / sum_exp_score[:, :, None]
-            global_attn = exp_global_scores / sum_exp_score
-            global_res = self.v_global(global_attn)
-            res += global_res
-        else:
-            global_norm_attn = None
-            global_attn = None
-            global_res = None
-
-        res = self.bias(res)
         if get_details:
+            ego_attnp = ego_score / normalization_factor
+            local_attnp = local_score / normalization_factor[:, :, None]
+            regional_attnps = [regional_score / normalization_factor[:, :, None] for regional_score in regional_scores]
+            # regional_attnps = [regional_score for regional_score in regional_scores]
+
+            ego_attnm = ego_attnp
+            local_attnm = local_attnp.sum(axis=-1)
+            regional_attnms = [regional_attnp.sum(axis=-1) for regional_attnp in regional_attnps]
+
             return res, {
-                'embq': (ego_emb, self.q_local_emb, self.q_global_emb),
-                'embk': (None, self.k_local_emb, self.k_global_emb),
-                'attnp': (ego_attn, local_norm_attn, global_norm_attn),
-                'attnm': (ego_attn, local_attn, global_attn),
-                'trivia': (ego_res, local_res, global_res)}
+                'attn': sum_attn,
+                'embq': q_emb,
+                'embk': (k_local_emb, k_regional_embs),
+                'attnp': (ego_attnp, local_attnp, regional_attnps),
+                'attnm': (ego_attnm, local_attnm, regional_attnms)}
         else:
             return res
 
     
 class Steamboat(nn.Module):
-    def __init__(self, features: list[str] | int, d_ego, d_local, d_global):
+    def __init__(self, features: list[str] | int, n_heads: int, n_scales: int = 2):
         """Steamboat model
 
         :param features: feature names (usuall `adata.var_names` or a column in `adata.var` for gene symbols)
-        :param d_ego: number of ego factors (use only when you know how many you need, otherwise, use local factors instead)
-        :param d_local: number of local factors
-        :param d_global: number of global factors
+        :param n_heads: number of heads
+        :param n_scales: number of scales
         """
         super(Steamboat, self).__init__()
 
@@ -367,55 +280,60 @@ class Steamboat(nn.Module):
         else:
             self.features = [f'feature_{i}' for i in range(features)]
 
-        # Three way attention
         d_in = len(self.features)
-        self.spatial_gather = BilinearAttention(d_in, d_ego, d_local, d_global, d_in)
+        self.spatial_gather = BilinearAttention(d_in, n_heads, n_scales)
 
-    def masking(self, x, mask_rate, masking_method):
+    def masking(self, x: torch.Tensor, xs, entry_masking_rate: float, feature_masking_rate: float):
         """Masking the dataset
 
         :param x: input data
         :param mask_rate: masking rate
         :param masking_method: full matrix or feature-wise masking
-        :raises ValueError: Unknown random mask method
         :return: masked data
         """
         out_x = x.clone()
-        # All cells are masked
-        if masking_method == 'full':
-            random_mask = torch.rand(x.shape, device=x.get_device()) < mask_rate
+        out_xs = []
+        if entry_masking_rate > 0.:
+            random_mask = torch.rand(x.shape, device=x.device) < entry_masking_rate
             out_x.masked_fill_(random_mask, 0.)
-        elif masking_method == 'feature':
-            random_mask = torch.rand([1, x.shape[1]], device=x.get_device()) < mask_rate
+        if feature_masking_rate > 0.:
+            random_mask = torch.rand([1, x.shape[1]], device=x.device) < feature_masking_rate
             out_x.masked_fill_(random_mask, 0.)
+            for x in xs:
+                x = x.clone()
+                x.masked_fill_(random_mask, 0.)
+                out_xs.append(x)
         else:
-            raise ValueError("Unknown random mask method.")
-        return out_x
+            for x in xs:
+                x = x.clone()
+                out_xs.append(x)
+        return out_x, out_xs
 
-    def forward(self, adj_matrix, x, masked_x, sparse_graph=True, get_details=False):
-        return self.spatial_gather(adj_matrix, x, masked_x, sparse_graph=sparse_graph, get_details=get_details)
+    def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False):
+        return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details)
 
     def fit(self, dataset: SteamboatDataset, 
-            masking_rate: float = 0.0, 
-            masking_method: Literal['full', 'feature']='full', 
+            entry_masking_rate: float = 0.0, feature_masking_rate: float = 0.0,
             device:str = 'cuda', 
-            *, orthogonal: float = 0., similarity_penalty: float = 0.0, 
-            opt=None, opt_args=None, max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
-            loss_fn: str = 'mse', log_dir: str = 'log/', report_per: int = 10):
+            *, 
+            opt=None, opt_args=None, 
+            loss_fun=None,
+            max_epoch: int = 100, stop_eps: float = 1e-4, stop_tol: int = 10, 
+            log_dir: str = 'log/', report_per: int = 10):
         """Create a PyTorch Dataset from a list of adata
 
         :param dataset: Dataset to be trained on
-        :param masking_rate: Rate of masking
-        :param masking_method: Method of masking (by "full" or "feature"), default "full"
+        :param entry_masking_rate: Rate of masking a random entries, default 0.0
+        :param feature_masking_rate: Rate of masking a full feature (can overlap with entry masking), default 0.0
         :param device: Device to be used ("cpu" or "cuda")
-        :param orthogonal: Orthogonality penalty
-        :param similarity_penalty: Similarity penalty
+        :param local_entropy_penalty: entropy penalty to make the local attention more diverse
         :param opt: Optimizer for fitting
         :param opt_args: Arguments for optimizer (e.g., {'lr': 0.01})
+        :param loss_fun: Loss function: Default is MSE (`nn.MSELoss`). 
+        You may use MAE `nn.L1Loss`, Huber 'nn.HuberLoss`, SmoothL1 `nn.SmoothL1Loss`, or a customized loss function.
         :param max_epoch: maximum number of epochs
         :param stop_eps: Stopping criterion: minimum change (see also `stop_tol`)
         :param stop_tol: Stopping criterion: number of epochs that don't meet `stop_eps` before stopping
-        :param loss_fn: Loss function for training
         :param log_dir: Directory to save logs
         :param report_per: report per how many epoch. 0 to only report before termination. negative number to never report.
 
@@ -426,22 +344,17 @@ class Steamboat(nn.Module):
         loader = DataLoader(dataset, batch_size=1, shuffle=True)
         parameters = self.parameters()
 
+        if loss_fun is None:
+            criterion = nn.MSELoss(reduction='sum')
+        else:
+            criterion = loss_fun
+
         if opt_args is None:
             opt_args = {}
-
         if opt is None:
             optimizer = optim.Adam(parameters, **opt_args)
         else:
             optimizer = opt(parameters, **opt_args)
-        # scheduler = lambda epoch :( 1 + np.cos((epoch - warmup) * np.pi / (max_epoch - warmup)) ) * 0.5 if epoch >= warmup else (epoch / warmup)
-        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=scheduler)
-        
-        if loss_fn == 'crossentropy':
-            criterion = nn.CrossEntropyLoss()
-        elif loss_fn == 'sce':
-            criterion = partial(_sce_loss, alpha=3)
-        elif loss_fn == "mse":
-            criterion = nn.MSELoss()
 
         os.makedirs(log_dir, exist_ok=True)
         logger = _get_logger('train', log_dir)
@@ -449,52 +362,64 @@ class Steamboat(nn.Module):
 
         cnt = 0
         best_loss = np.inf
+        n_cells = 0
+        n_genes = 0
+        for x, adj_list, regional_xs, regional_adj_lists in loader:
+            n_cells += x.shape[0]
+            n_genes = x.shape[1]
         for epoch in range(max_epoch):
-            total_loss = 0.
-            total_penalty = 0.
-            for x, adj_matrix, _, _ in loader:
+            avg_loss = 0.
+            optimizer.zero_grad()
+            for x, adj_list, regional_xs, regional_adj_lists in loader:
+                # Send everything to required device
+                adj_list = adj_list.squeeze(0).to(device)
                 x = x.squeeze(0).to(device)
-                adj_matrix = adj_matrix.squeeze(0).to(device)
-                masked_x = self.masking(x, masking_rate, masking_method)
-                x_recon = self(adj_matrix, x, masked_x, sparse_graph=dataset.sparse_graph)
+                regional_adj_lists = [regional_adj_list.squeeze(0).to(device) for regional_adj_list in regional_adj_lists]
+                regional_xs = [regional_x.squeeze(0).to(device) for regional_x in regional_xs]
+
+                masked_x, masked_xs = self.masking(x, regional_xs, entry_masking_rate, feature_masking_rate)
+
+                x_recon = self.forward(adj_list, masked_x, masked_x, 
+                                       regional_adj_lists, masked_xs, get_details=False)
                 
-                loss = criterion(x, x_recon)
-                total_loss += loss.item()
+                # loss = criterion(x_recon, x)
+                # total_loss = loss + total_loss
+                loss = criterion(x_recon, x) / n_cells / n_genes
+                avg_loss += loss.item()
+                loss.backward()
+                # n_cells += x.shape[0]
+                # loss = loss * x.shape[0] / 10000 # handle size differences among datasets; larger dataset has higher weight
 
-                loss = loss # * x.shape[0] / 10000 # handle size differences among datasets; larger dataset has higher weight
+                # reg = 0.
+                # if flat_k_penalty > 0.:
+                #     reg += self.spatial_gather.flat_k_penalty(**flat_k_penalty_args) * flat_k_penalty
+                #     total_penalty += reg.item()
+                # if switch_l2_penalty > 0.:
+                #     reg += self.spatial_gather.switch.l2_reg() * switch_l2_penalty
+                #     total_penalty += reg.item()
+                # if weight_l2_penalty > 0.:
+                #     reg += self.spatial_gather.l2_reg() * weight_l2_penalty
+                #     total_penalty += reg.item()
+            optimizer.step()
 
-                reg = 0.
-                if orthogonal > 0.:
-                    reg = self.spatial_gather.q_othorgonality() * orthogonal + reg
-                if similarity_penalty > 0.:
-                    reg = (self.spatial_gather.local_cos() + self.spatial_gather.local_cell_cos()) * similarity_penalty + reg
-                if reg != 0.:
-                    total_penalty += reg.item()
-                optimizer.zero_grad()
-                (loss + reg).backward()
-                optimizer.step()
-
-            avg_loss = total_loss / len(loader)
-            avg_penalty = total_penalty / len(loader)
-
-            if best_loss - (avg_loss + avg_penalty) < stop_eps:
+            if best_loss - avg_loss < stop_eps:
                 cnt += 1
             else:
                 cnt = 0
             if report_per >= 0 and cnt >= stop_tol:
-                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}, reg {avg_penalty:.6f}")
+                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}")
                 logger.info(f"Stopping criterion met.")
                 break
             elif report_per > 0 and (epoch % report_per) == 0:
-                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}, reg {avg_penalty:.6f}")
-            best_loss = min(best_loss, avg_loss + avg_penalty)
+                logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}")
+            best_loss = min(best_loss, avg_loss)
 
             # writer.add_scalar('Train_Loss', train_loss / len(loader), epoch)
             # writer.add_scalar('Learning_Rate', optimizer.state_dict()["param_groups"][0]["lr"], epoch)
             # scheduler.step()
         else:
             logger.info(f"Maximum iterations reached.")
-        self.fit_loss = avg_loss
+            
         self.eval()
         return self
 
@@ -504,7 +429,7 @@ class Steamboat(nn.Module):
             if not isinstance(x, torch.Tensor):
                 x = torch.Tensor(x)
             if not isinstance(adj_matrix, torch.Tensor):
-                adj_matrix = torch.BoolTensor(adj_matrix)
+                adj_matrix = torch.Tensor(adj_matrix)
             
             return self(adj_matrix, x, get_details=True)
 
