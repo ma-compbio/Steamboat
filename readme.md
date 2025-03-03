@@ -19,9 +19,9 @@ dataset = sf.make_dataset(adatas)
 
 Create a `Steamboat` model and fit it to the data.
 ```python
-model = sf.Steamboat(adata.var_names.tolist(), d_ego=0, d_local=5, d_global=0)
+model = sf.Steamboat(short_features, n_heads=10, n_scales=3)
 model = model.to("cuda") # if you GPU acceleration is supported.
-model.fit(dataset, masking_rate=0.25)
+model.fit(dataset)
 ```
 
 After training you can check the trained metagenes.
