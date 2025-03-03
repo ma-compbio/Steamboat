@@ -46,5 +46,7 @@ A few examples in Jupyter notebook are included in the examples folder:
 - [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
 - [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
 
+Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing).
+
 ## Documentation
 For the full API and real data examples, please visit our [documentation](https://steamboat.readthedocs.io/en/latest/).
