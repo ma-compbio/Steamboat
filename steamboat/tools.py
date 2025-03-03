@@ -931,7 +931,7 @@ def plot_vq(model, chosen_features):
 def plot_all_transforms(model, 
                    top: int = 3, head_order=None,
                    figsize: str | tuple[float, float] = 'auto',
-                    chosen_features=None):
+                   chosen_features=None):
     if chosen_features is None:
         feature_mask = {}
         for d in head_order if head_order is not None else range(model.spatial_gather.n_heads):
@@ -961,9 +961,13 @@ def plot_all_transforms(model,
             feature_mask.append(model.features.index(i))
     print(chosen_features)
     
+    n_plot_heads = model.spatial_gather.n_heads
+    if head_order is not None:
+        n_plot_heads = len(head_order)
+
     if figsize == 'auto':
-        figsize = (.7 * (1 + model.spatial_gather.n_heads), len(chosen_features) * 0.15 + .75)
-    fig, axes = plt.subplots(1, model.spatial_gather.n_heads + 1, figsize=figsize, sharey='row')
+        figsize = (.7 * (1 + n_plot_heads), len(chosen_features) * 0.15 + .75)
+    fig, axes = plt.subplots(1, n_plot_heads + 1, figsize=figsize, sharey='row')
 
     cbar_ax = axes[-1].inset_axes([0.0, 0.1, .2, .8])
     axes[-1].get_xaxis().set_visible(False)
