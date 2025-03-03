@@ -3,8 +3,7 @@
 [![Documentation Status](https://readthedocs.org/projects/steamboat/badge/?version=latest)](https://steamboat.readthedocs.io/en/latest/?badge=latest)
 
 Steamboat is a computational model to decipher short- and long-distance cellular interactions based on the multi-head attention mechanism. 
-
-![fig-github](https://github.com/user-attachments/assets/49284ea9-102c-4c13-bb77-b46bb7409c7e)
+![fig1-v3-abstract](https://github.com/user-attachments/assets/0fc4cbe1-b43c-48dc-9397-81881d2ecda7)
 
 ## Standard workflow
 ```python
