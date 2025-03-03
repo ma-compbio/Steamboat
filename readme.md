@@ -24,13 +24,9 @@ model = model.to("cuda") # if you GPU acceleration is supported.
 model.fit(dataset)
 ```
 
-After training you can check the trained metagenes.
+After training, you can check the trained metagenes.
 ```python
-sf.tools.plot_transforms(model, figsize=(4, 4), vmin=0.0, vmax=.5, top=0)
-```
-This can be very slow for a lot of metagenes, so you can use another function to just plot one of them.
-```python
-plot_transform(model, "local", 0, top=18)
+sf.tools.plot_all_transforms(model, top=1)
 ```
 
 For clustering and segmentation, run the following lines. Change the resolution to your liking.
