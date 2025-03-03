@@ -38,9 +38,12 @@ sf.tools.segment(adata, resolution=0.5)
 
 ## Examples
 A few examples in Jupyter notebook are included in the examples folder: 
-- [Illustration (simulated)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex0_tiny_simulation.ipynb)
-- [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
-- [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
+1. [Illustration (simulated)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex0_tiny_simulation.ipynb)
+2. [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
+3. Mouse brain
+   - [Training](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_train.ipynb)
+   - [Spatial perturbation](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_spatial_perturbation.ipynb)
+4. [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
 
 Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing).
 
