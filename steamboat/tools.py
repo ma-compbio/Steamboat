@@ -11,7 +11,9 @@ import numpy as np
 import torch
 from .dataset import SteamboatDataset
 import scipy as sp
-from tqdm import tqdm
+from sklearn.metrics import roc_auc_score
+from tqdm.auto import tqdm
+import squidpy as sq
 
 palettes = {
     'ncr10': ['#E64B35', '#4DBBD5', '#00A087', '#3C5488', '#F39B7F', 
@@ -577,83 +579,255 @@ def plot_transforms(model: Steamboat, top: int = 3, reorder: bool = False,
             fig.add_artist(line)
 
 
-def annotate_adatas(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steamboat, 
-                    device='cuda', get_recon=False):
-    """_summary_
+def calc_v_weights(model: Steamboat, normalize: bool = True):
+    v_weights = model.spatial_gather.v.weight.detach().cpu().numpy().sum(axis=0)
+    if normalize:
+        v_weights = v_weights / sum(v_weights)
+    return v_weights
 
-    :param adatas: _description_
-    :param dataset: _description_
-    :param model: _description_
-    :param device: _description_, defaults to 'cuda'
+def calc_head_weights(adatas, model: Steamboat):
+    ego = 0
+    local = 0
+    regional = 0
+
+    for i in range(len(adatas)):
+        ego += np.mean(adatas[i].obsm['ego_attn'], axis=0)
+        local += np.mean(adatas[i].obsm['local_attn'], axis=0)
+        regional += np.mean(adatas[i].obsm['global_attn_0'], axis=0)
+
+    matrix = np.vstack([ego, local, regional]) * calc_v_weights(model)
+
+    return matrix
+
+
+def calc_interaction(adatas, model: Steamboat, sample_key: str, cell_type_key: str, pseudocount: float = 20.):
+    v_weights = calc_v_weights(model)
+    celltype_attnp_df_dict = {}
+    for i in range(len(adatas)):    
+        total_attnp = None
+        for j in range(model.spatial_gather.n_heads):
+            if total_attnp is None:
+                total_attnp = adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * 25
+            else:
+                total_attnp += adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * 25
+        
+        celltypes = sorted(adatas[i].obs['cell.types.nolc'].unique())
+        celltype_attnp_df = pd.DataFrame(-1., index=celltypes, columns=celltypes)
+        
+        actual_min = float("inf")
+        for celltype0 in celltype_attnp_df.index:
+            mask0 = (adatas[i].obs[cell_type_key] == celltype0)
+            for celltype1 in celltype_attnp_df.columns:
+                mask1 = (adatas[i].obs[cell_type_key] == celltype1)
+                sub_attnp = total_attnp[mask0, :][:, mask1]
+                normalization_factor = sub_attnp.nnz + 20
+                # normalization_factor = np.prod(sub_attnp.shape)
+                if normalization_factor >= 1:
+                    celltype_attnp_df.loc[celltype0, celltype1] = sub_attnp.sum() / normalization_factor
+                    actual_min = min(actual_min, celltype_attnp_df.loc[celltype0, celltype1])
+                else:
+                    celltype_attnp_df.loc[celltype0, celltype1] = 0.
+
+        celltype_attnp_df_dict[adatas[i].obs[sample_key].unique().astype(str).item()] = celltype_attnp_df + celltype_attnp_df.T
+    return celltype_attnp_df_dict
+
+
+def calc_adjacency_freq(adatas, sample_key: str, cell_type_key: str):
+    adjacency_freq = {}
+    for i in range(len(adatas)):
+        k = adatas[i].obs[sample_key].unique().astype(str).item()
+        adatas[i].obs[cell_type_key] = adatas[i].obs[cell_type_key].astype("category")
+        sq.gr.interaction_matrix(adatas[i], cell_type_key, normalized=False)
+        temp = pd.DataFrame(adatas[i].uns['cell.types.nolc_interactions'], 
+                                            index=adatas[i].obs[cell_type_key].cat.categories, 
+                                            columns=adatas[i].obs[cell_type_key].cat.categories)
+        normalization_factor = adatas[i].obs[cell_type_key].value_counts().sort_index() + 20
+        adjacency_freq[k] = temp.div(normalization_factor, axis=0).div(normalization_factor, axis=1)
+    return adjacency_freq
+
+
+def plot_head_weights(head_weights, multiplier: float = 100, order=None, figsize=(7, 0.8), heatmap_kwargs=None, save: str = None):
+    matrix = head_weights.copy()
+    matrix /= matrix.sum()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    heatmap_kwargs0 = dict(vmax=10, linewidths=0.2, linecolor='grey', cmap='Reds', annot=True, fmt='.0f', square=True)
+    if heatmap_kwargs is not None:
+        for key, value in heatmap_kwargs.items():
+            heatmap_kwargs0[key] = value
+    
+    if order is None:
+        sns.heatmap(matrix * 100, ax=ax, **heatmap_kwargs0)
+    else:
+        sns.heatmap(matrix[:, order] * 100, vmax=10, ax=ax, linewidths=0.2, linecolor='grey', cmap='Reds', annot=True, fmt='.0f', square=True)
+        ax.set_xticklabels(order, rotation=0)
+    
+    ax.set_yticklabels(['ego', 'local', 'regional'], rotation=0)
+
+    if save is not None and save != False:
+        assert isinstance(save, str), "save must be a string."
+        fig.savefig(save, bbox_inches='tight', transparent=True)
+
+
+def calc_var(model: Steamboat):
+    n_heads = model.spatial_gather.n_heads
+    q = model.spatial_gather.q.weight.detach().cpu().numpy()
+    k_local = model.spatial_gather.k_local.weight.detach().cpu().numpy()
+    k_global = model.spatial_gather.k_regionals[0].weight.detach().cpu().numpy()
+    v = model.spatial_gather.v.weight.detach().cpu().numpy().T
+
+    index = ([f'q_{i}' for i in range(n_heads)] + 
+            [f'k_local_{i}' for i in range(n_heads)] + 
+            [f'k_global_{i}' for i in range(n_heads)] + 
+            [f'v_{i}' for i in range(n_heads)])
+
+    return pd.DataFrame(np.vstack([q, k_local, k_global, v]), 
+                        index=index, columns=model.features).T
+
+
+def calc_geneset_auroc(metagenes, genesets):
+    gene_df = metagenes.copy()
+    df = pd.DataFrame(index=gene_df.columns)
+    for k, v in genesets.items():
+        aurocs = []
+        pvals = []
+        for i in gene_df.columns:
+            aurocs.append(roc_auc_score(gene_df.index.isin(v), gene_df[i]))
+            pvals.append(sp.stats.mannwhitneyu(gene_df.loc[gene_df.index.isin(v), i],
+                                                           gene_df.loc[~gene_df.index.isin(v), i]).pvalue)
+        df[k + '_auroc'] = aurocs
+        # df[k + '_p'] = pvals
+    return df
+
+
+def calc_geneset_auroc_order(sig_df, by='q'):
+    plt_df = sig_df[sig_df.index.str.contains(by + '_')]
+    order = np.argsort(np.argmax(plt_df, axis=1) - np.max(plt_df, axis=1) / (np.max(plt_df) + 1)).tolist()
+    return order
+
+
+def plot_geneset_auroc(sig_df, order, figsize=(8, 5)):
+    fig, axes = plt.subplots(3, 1, figsize=figsize)
+
+    ax = axes[0]
+    plt_df = sig_df[sig_df.index.str.contains('q_')]
+    sns.heatmap(plt_df.T.iloc[:, order], vmin=.2, vmax=.8, cmap='vlag', 
+            linewidths=.5, linecolor='grey', ax=ax, square=True)
+    ax.set_xticklabels(order, rotation=0)
+    ax.set_xlabel('Center cell metagenes')
+
+    ax = axes[1]
+    plt_df = sig_df[sig_df.index.str.contains('k_local')]
+    sns.heatmap(plt_df.T.iloc[:, order], vmin=.2, vmax=.8, cmap='vlag', 
+            linewidths=.5, linecolor='grey', ax=ax, square=True)
+    ax.set_xticklabels(order, rotation=0)
+    ax.set_xlabel('Local environment metagenes')
+
+    ax = axes[2]
+    plt_df = sig_df[sig_df.index.str.contains('k_global')]
+    sns.heatmap(plt_df.T.iloc[:, order], vmin=.2, vmax=.8, cmap='vlag', 
+            linewidths=.5, linecolor='grey', ax=ax, square=True)
+    ax.set_xticklabels(order, rotation=0)
+    ax.set_xlabel('Global environment metagenes')
+
+    fig.tight_layout()
+    return fig, ax
+
+def calc_obs(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steamboat, 
+                    device='cuda', get_recon: bool = False):
+    """Calculate and store the embeddings and attention scores in the AnnData objects
+    
+    :param adatas: List of AnnData objects to store the embeddings and attention scores
+    :param dataset: SteamboatDataset object to be processed
+    :param model: Steamboat model
+    :param device: Device to run the model, defaults to 'cuda'
+    :param get_recon: Whether to store the reconstructed data, defaults to False
     """
     # Safeguards
     assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
     for adata, data in zip(adatas, dataset):
         assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
 
-
-    # Assignments
-    # d_ego: int = model.spatial_gather.d_ego
-    d_local: int = model.spatial_gather.d_local
-    # d_global: int = model.spatial_gather.d_global
-
-    for i, (x, adj) in tqdm(enumerate(dataset), total=len(dataset)):
-            x = x.to(device)
-            adj = adj.to(device)
-            with torch.no_grad():
-                res, details = model(adj, x, x, sparse_graph=True, get_details=True)
-                
+    # Calculate embeddings and attention scores for each slide
+    for i, (x, adj_list, regional_xs, regional_adj_lists) in tqdm(enumerate(dataset), total=len(dataset)):
+        adj_list = adj_list.squeeze(0).to(device)
+        x = x.squeeze(0).to(device)
+        regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
+        regional_xs = [regional_x.to(device) for regional_x in regional_xs]
+        
+        with torch.no_grad():
+            res, details = model(adj_list, x, x, regional_adj_lists, regional_xs, get_details=True)
+            
             if get_recon:
                 adatas[i].obsm['X_recon'] = res.cpu().numpy()
 
-            scopes = ['ego', 'local', 'global']
+            adatas[i].obsm['q'] = details['embq'].cpu().numpy()
+            adatas[i].obsm['local_k'] = details['embk'][0].cpu().numpy()
 
-            # raw emb q
-            for which, what in enumerate(scopes):
-                if details['embq'][which] is not None:
-                    adatas[i].obsm[f'X_{what}_q'] = details['embq'][which].cpu().numpy()
-                else:
-                    adatas[i].obsm[f'X_{what}_q'] = np.zeros([adatas[i].shape[0], 0])
+            for j in range(model.spatial_gather.n_scales - 2):
+                adatas[i].obsm[f'global_k_{j}'] = model.spatial_gather.k_regionals[j](x).cpu().numpy()
 
-            # raw emb k
-            if details['embk'][1] is not None:
-                adatas[i].obsm[f'X_local_k'] = details['embk'][1].cpu().numpy()
-            else:
-                adatas[i].obsm[f'X_local_k'] = np.zeros([adatas[i].shape[0], 0])
+            for j, emb in enumerate(details['embk'][1]):
+                adatas[i].uns[f'global_k_{j}'] = emb.cpu().numpy()
+                
+            adatas[i].obsm['attn'] = details['attn'].cpu().numpy()
+            adatas[i].obsm['ego_attn'] = details['attnm'][0].cpu().numpy()
+            adatas[i].obsm['local_attn'] = details['attnm'][1].cpu().numpy()
 
-            if details['embk'][2] is not None:
-                adatas[i].uns[f'X_global_k'] = details['embk'][2].cpu().numpy()
-            else:
-                adatas[i].uns[f'X_global_k'] = np.zeros([1, 0])
-
-            # attn (as embedding)
-            for which, what in enumerate(scopes):
-                if details['attnm'][which] is not None:
-                    adatas[i].obsm[f'X_{what}_attn'] = details['attnm'][which].cpu().numpy()
-                else:
-                    adatas[i].obsm[f'X_{what}_attn'] = np.zeros([adatas[i].shape[0], 0])
+            for j, matrix in enumerate(details['attnm'][2]):
+                adatas[i].obsm[f'global_attn_{j}'] = matrix.cpu().numpy()
 
             # local attention (as graph)
-            for j in range(d_local):
+            for j in range(model.spatial_gather.n_heads):
                 w = details['attnp'][1].cpu().numpy()[:, j, :].flatten()
-                uv = adj.cpu().numpy()
+                uv = adj_list.cpu().numpy()
                 u = uv[0]
                 v = uv[1]
                 if uv.shape[0] == 3: # masked for unequal neighbors
                     m = (uv[2] > 0)
                     w, u, v = w[m], u[m], v[m]
                 adatas[i].obsp[f'local_attn_{j}'] = sp.sparse.csr_matrix((w, (u, v)), 
-                                                                         shape=(adatas[i].shape[0], 
+                                                                            shape=(adatas[i].shape[0], 
                                                                                 adatas[i].shape[0]))
 
 
-def gather_obsm(adata: sc.AnnData, adatas: list[sc.AnnData]):
-    """_summary_
+def gather_obs(adata: sc.AnnData, adatas: list[sc.AnnData]):
+    """Gather obs/obsm/uns from a list of AnnData objects to a single AnnData object
 
-    :param adata: _description_
-    :param adatas: _description_
     """
-    pass
+    all_embq = []
+    all_embk = []
+    all_embk_glb = []
+    all_ego_attn = []
+    all_local_attn = []
+    all_global_attn = []
+    all_attn = []
+    
+    for i in range(len(adatas)):
+        all_embq.append(adatas[i].obsm['q'])
+        all_embk.append(adatas[i].obsm['local_k'])
+        all_ego_attn.append(adatas[i].obsm['ego_attn'])
+        all_local_attn.append(adatas[i].obsm['local_attn'])
+        all_global_attn.append(adatas[i].obsm['global_attn_0'])
+        all_attn.append(adatas[i].obsm['attn'])
+        all_embk_glb.append(adatas[i].obsm['global_k_0'])
+
+    adata.obsm['q'] = np.vstack(all_embq)
+    adata.obsm['local_k'] = np.vstack(all_embk)
+    adata.obsm['ego_attn'] = np.vstack(all_ego_attn)
+    adata.obsm['local_attn'] = np.vstack(all_local_attn)
+    adata.obsm['global_attn'] = np.vstack(all_global_attn)
+    
+    adata.obsm['attn'] = np.vstack(all_attn)
+    adata.obsm['global_k_0'] = np.vstack(all_embk_glb)
+
+    if 'X_recon' in adatas[0].obsm:
+        all_recon = []
+        for i in range(len(adatas)):
+            all_recon.append(adatas[i].obsm['X_recon'])
+        adata.obsm['X_recon'] = np.vstack(all_recon)
+
+    return adata
 
 
 def neighbors(adata: sc.AnnData,
@@ -740,125 +914,168 @@ def segment(adata: sc.AnnData, resolution: float = 1., *,
                         key_added=key_added, resolution=resolution, **leiden_kwargs)
 
 
-def plot_transforms_combined(model, top=3, reorder=False, figsize='auto'):
-    d_ego = model.spatial_gather.d_ego
-    d_loc = model.spatial_gather.d_local
-    d_glb = model.spatial_gather.d_global
-    d = d_ego + d_loc + d_glb
+def plot_vq(model, chosen_features):
+    features_mask = [model.features.index(i) for i in chosen_features]
 
-    qk_ego, v_ego = model.get_ego_transform()
-    q_local, k_local, v_local = model.get_local_transform()
-    q_global, k_global, v_global = model.get_global_transform()
+    q = model.spatial_gather.q.weight.detach().cpu().numpy().T
+    q = q[features_mask, :]
+    q = q / q.max(axis=0)
+    head_order = np.argsort(np.argmax(q.T, axis=1) - np.max(q.T, axis=1) / (np.max(q.T) + 1)).tolist()
 
-    if reorder:
-        rank_v_ego = np.argsort(-v_ego, axis=1)[:, :top]
-        rank_q_local = np.argsort(-np.abs(q_local), axis=1)[:, :top]
-        rank_k_local = np.argsort(-k_local, axis=1)[:, :top]
-        rank_v_local = np.argsort(-v_local, axis=1)[:, :top]
-        rank_q_global = np.argsort(-np.abs(q_global), axis=1)[:, :top]
-        rank_k_global = np.argsort(-k_global, axis=1)[:, :top]
-        rank_v_global = np.argsort(-v_global, axis=1)[:, :top]
+    common_params = {'linewidths': .05, 'linecolor': 'gray', 'cmap': 'Reds'}
+    fig, ax = plt.subplots(figsize=(3, 3))
+    sns.heatmap(q[:, head_order], yticklabels=chosen_features, xticklabels=head_order, square=True, **common_params, ax=ax)
+    return fig, ax
+
+
+def plot_all_transforms(model, 
+                   top: int = 3, head_order=None,
+                   figsize: str | tuple[float, float] = 'auto',
+                    chosen_features=None):
+    if chosen_features is None:
         feature_mask = {}
-        for i in rank_v_ego:
-            for j in i:
+        for d in head_order if head_order is not None else range(model.spatial_gather.n_heads):
+            k1 = model.spatial_gather.k_local.weight[d, :].detach().cpu().numpy()
+            k2 = model.spatial_gather.k_regionals[0].weight[d, :].detach().cpu().numpy()
+            q = model.spatial_gather.q.weight[d, :].detach().cpu().numpy()
+            v = model.spatial_gather.v.weight[:, d].detach().cpu().numpy()
+        
+            rank_q = np.argsort(-q)[:top]
+            rank_k1 = np.argsort(-k1)[:top]
+            rank_k2 = np.argsort(-k2)[:top]
+            rank_v = np.argsort(-v)[:top]
+    
+            for j in rank_k1:
                 feature_mask[j] = None
-        for i in range(d_loc):
-            for j in rank_k_local[i, :]:
+            for j in rank_k2:
                 feature_mask[j] = None
-        for i in range(d_loc):
-            for j in rank_q_local[i, :]:
+            for j in rank_q:
                 feature_mask[j] = None
-        for i in range(d_loc):
-            for j in rank_v_local[i, :]:
-                feature_mask[j] = None
-        for i in range(d_glb):
-            for j in rank_k_global[i, :]:
-                feature_mask[j] = None
-        for i in range(d_glb):
-            for j in rank_q_global[i, :]:
-                feature_mask[j] = None
-        for i in range(d_glb):
-            for j in rank_v_global[i, :]:
+            for j in rank_v:
                 feature_mask[j] = None
         feature_mask = list(feature_mask.keys())
+        chosen_features = np.array(model.features)[feature_mask]
     else:
-        rank_v_ego = rank(v_ego)
-        rank_q_local = rank(np.abs(q_local))
-        rank_k_local = rank(k_local)
-        rank_v_local = rank(v_local)
-        rank_q_global = rank(np.abs(q_global))
-        rank_k_global = rank(k_global)
-        rank_v_global = rank(v_global)
-        max_rank = np.max(np.vstack([rank_v_ego, rank_q_local, rank_k_local, rank_v_local, rank_q_global, rank_k_global, rank_v_global]), axis=0)
-        feature_mask = (max_rank > (max_rank.max() - 3))
-        
-    chosen_features = np.array(model.features)[feature_mask]
-
+        feature_mask = []
+        for i in chosen_features:
+            feature_mask.append(model.features.index(i))
+    print(chosen_features)
+    
     if figsize == 'auto':
-        figsize = (d * 0.2 + 4, len(chosen_features) * 0.15 + 1)
-    print(figsize)
-    fig, (cbar_axes, axes) = plt.subplots(2, 7, sharey='row', 
-                                          figsize=figsize, 
-                                          height_ratios=(1, len(chosen_features) + 1),
-                                          width_ratios=(d_ego, d_loc, d_loc, d_loc, d_glb, d_glb, d_glb))
+        figsize = (.7 * (1 + model.spatial_gather.n_heads), len(chosen_features) * 0.15 + .75)
+    fig, axes = plt.subplots(1, model.spatial_gather.n_heads + 1, figsize=figsize, sharey='row')
+
+    cbar_ax = axes[-1].inset_axes([0.0, 0.1, .2, .8])
+    axes[-1].get_xaxis().set_visible(False)
+    for ax in axes[1:]:
+        ax.get_yaxis().set_visible(False)
+    for pos in ['right', 'top', 'bottom', 'left']:
+        axes[-1].spines[pos].set_visible(False)
+        
+    for i_ax, d in enumerate(head_order if head_order is not None else range(model.spatial_gather.n_heads)):
+        k1 = model.spatial_gather.k_local.weight[d, :].detach().cpu().numpy()
+        k2 = model.spatial_gather.k_regionals[0].weight[d, :].detach().cpu().numpy()
+        q = model.spatial_gather.q.weight[d, :].detach().cpu().numpy()
+        v = model.spatial_gather.v.weight[:, d].detach().cpu().numpy()
+        
+        common_params = {'linewidths': .05, 'linecolor': 'gray', 'yticklabels': chosen_features, 
+                         'cmap': 'Reds'}
+
+        to_plot = np.vstack((k2[feature_mask],
+                                 k1[feature_mask],
+                                 q[feature_mask],
+                                 v[feature_mask])).T
+        true_vmax = to_plot.max(axis=0)
+        # print(true_vmax)
+        to_plot /= true_vmax
+        
+        sns.heatmap(to_plot, xticklabels=['global env', 'local env', 'ego env / center', 'reconstruction'], square=True, 
+                    ax=axes[i_ax], **common_params, cbar_ax=cbar_ax)
+        axes[i_ax].set_title(d)
+        # axes[i_ax].set_xticklabels(['global env', 'local env', 'ego env / center', 'reconstruction'], rotation=45, ha='right', va='center', rotation_mode='anchor')
+        # ax.set_xticklabels(plot_axes[i].get_xticklabels(), rotation=0)
+        # ax.get_yaxis().set_visible(False)
     
-    common_params = {'linewidths': .05, 'linecolor': 'gray', 'yticklabels': chosen_features, 
-                     'cmap': 'Reds', 'cbar_kws': {"orientation": "horizontal"}, 'square': True,
-                     'vmin': 0.}
-
-    #
-    labels = ([f'$V_{{{i}}}$' for i in range(d_ego)])
-    vmax = np.ceil(v_ego[:, feature_mask].max())
-    sns.heatmap(v_ego[:, feature_mask].T, xticklabels=labels, ax=axes[0], 
-                **common_params, cbar_ax=cbar_axes[0], vmax=vmax)
-    axes[0].set_xlabel('Components\n╰── Ego ──╯')
-
-    # Local
-    #
-    labels = ([f'$V_{{{i}}}$' for i in range(d_loc)])
-    vmax = np.ceil(v_local[:, feature_mask].max())
-    sns.heatmap(v_local[:, feature_mask].T, xticklabels=labels, ax=axes[3], 
-                **common_params, cbar_ax=cbar_axes[3], vmax=vmax)
-    axes[3].set_xlabel('Response')
-
-    #
-    labels = ([f'$Q_{{{i}}}$' for i in range(d_loc)])
-    vmax = np.ceil(q_local[:, feature_mask].max())
-    sns.heatmap(q_local[:, feature_mask].T, xticklabels=labels, ax=axes[2], 
-                **common_params, cbar_ax=cbar_axes[2], vmax=vmax)
-    axes[2].set_xlabel('Receiver\n╰' + '─' * (d_loc * 3 // 2) + '─ Local ─' + '─' * (d_loc * 3 // 2) + '╯')
-
-    #
-    labels = ([f'$K_{{{i}}}$' for i in range(d_loc)])
-    vmax = np.ceil(k_local[:, feature_mask].max())
-    sns.heatmap(k_local[:, feature_mask].T, xticklabels=labels, ax=axes[1], 
-                **common_params, cbar_ax=cbar_axes[1], vmax=vmax)
-    axes[1].set_xlabel('Sender')
-
-    # Global
-    #
-    labels = ([f'$V_{{{i}}}$' for i in range(d_glb)])
-    vmax = np.ceil(v_global[:, feature_mask].max())
-    sns.heatmap(v_global[:, feature_mask].T, xticklabels=labels, ax=axes[6], 
-                **common_params, cbar_ax=cbar_axes[6], vmax=vmax)
-    axes[6].set_xlabel('Resp.')
-
-    #
-    labels = ([f'$Q_{{{i}}}$' for i in range(d_glb)])
-    vmax = np.ceil(q_global[:, feature_mask].max())
-    sns.heatmap(q_global[:, feature_mask].T, xticklabels=labels, ax=axes[5], 
-                **common_params, cbar_ax=cbar_axes[5], vmax=vmax)
-    axes[5].set_xlabel('Rec.\n╰─── Global ───╯')
-
-    #
-    labels = ([f'$K_{{{i}}}$' for i in range(d_glb)])
-    vmax = np.ceil(k_global[:, feature_mask].max())
-    sns.heatmap(k_global[:, feature_mask].T, xticklabels=labels, ax=axes[4], 
-                **common_params, cbar_ax=cbar_axes[4], vmax=vmax)
-    axes[4].set_xlabel('Send.')
-
-    for i in range(7):
-        axes[i].set_xticklabels(axes[i].get_xticklabels(), rotation=0)
-    
-    fig.align_xlabels()
     plt.tight_layout()
+
+
+def plot_cell_type_enrichment(all_adata, adatas, score_dim, label_key, select_labels=None,
+                              figsize=(.75, 4)):
+    all_adata.obsm[f'q_{score_dim}'] = np.vstack([i.obsm['q'][:, None, score_dim] for i in adatas])
+    all_adata.obsm[f'global_attn_{score_dim}'] = np.vstack([i.obsm['global_attn_0'][:, None, score_dim] for i in adatas])
+    all_adata.obsm[f'global_k_0_{score_dim}'] = np.vstack([i.obsm['global_k_0'][:, None, score_dim] for i in adatas])
+
+    cols = [f'q_{score_dim}']
+    global_attn_df = pd.DataFrame(all_adata.obsm[f'q_{score_dim}'], 
+                                index=all_adata.obs_names, 
+                                columns=cols)
+    global_attn_df[label_key] = all_adata.obs[label_key]
+
+    cell_median_df = global_attn_df[[label_key] + cols].groupby(label_key).median().astype('float')
+    cell_p_df = cell_median_df.copy()
+    cell_p_df[:] = 0.
+    cell_f_df = cell_p_df.copy()
+
+    for i in cell_p_df.columns:
+        for j in cell_p_df.index:
+            x = global_attn_df.loc[global_attn_df[label_key] == j, i]
+            y = global_attn_df.loc[global_attn_df[label_key] != j, i]
+            test_res = sp.stats.mannwhitneyu(x, y)
+            cell_p_df.loc[j, i] = test_res.pvalue
+            cell_f_df.loc[j, i] = test_res.statistic / len(x) / len(y)
+
+    selected_celltypes = {}
+    for i in cell_f_df.columns:
+        for j in cell_f_df.sort_values(i, ascending=False).index[:len(cell_f_df)]:
+            if j not in ['dirt', 'undefined']:
+                selected_celltypes[j] = None
+    selected_celltypes = list(selected_celltypes.keys())
+    if select_labels is not None:
+        selected_celltypes = [i for i in selected_celltypes if i in select_labels]
+    
+    cols = [f'global_attn_{score_dim}']
+    global_attn_df = pd.DataFrame(all_adata.obsm[f'global_attn_{score_dim}'], 
+                                index=all_adata.obs_names, 
+                                columns=cols)
+    global_attn_df[label_key] = all_adata.obs[label_key]
+
+    for i in cols:
+        for j in cell_p_df.index:
+            x = global_attn_df.loc[global_attn_df[label_key] == j, i]
+            y = global_attn_df.loc[global_attn_df[label_key] != j, i]
+            test_res = sp.stats.mannwhitneyu(x, y)
+            cell_p_df.loc[j, i] = test_res.pvalue
+            cell_f_df.loc[j, i] = test_res.statistic / len(x) / len(y)
+
+
+    cols = [f'global_k_0_{score_dim}']
+    global_attn_df = pd.DataFrame(all_adata.obsm[f'global_k_0_{score_dim}'], 
+                                index=all_adata.obs_names, 
+                                columns=cols)
+    global_attn_df[label_key] = all_adata.obs[label_key]
+
+    for i in cols:
+        for j in cell_p_df.index:
+            x = global_attn_df.loc[global_attn_df[label_key] == j, i]
+            y = global_attn_df.loc[global_attn_df[label_key] != j, i]
+            test_res = sp.stats.mannwhitneyu(x, y)
+            cell_p_df.loc[j, i] = test_res.pvalue
+            cell_f_df.loc[j, i] = test_res.statistic / len(x) / len(y)
+            
+    cell_p_df *= cell_p_df.shape[0]
+
+    common_params = {'linewidths': .05, 'linecolor': 'gray', 'cmap': 'vlag', 'center': .5, 'square': True}
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.heatmap(cell_f_df.loc[selected_celltypes], ax=ax, **common_params)
+    # selected_cell_p_df = cell_p_df.loc[selected_celltypes]
+    # for i, iv in enumerate(selected_cell_p_df.index):
+    #     for j, jv in enumerate(selected_cell_p_df.columns):
+    #         text = p2stars(selected_cell_p_df.loc[iv, jv])
+    #         ax.text(j + .5, i + .5, text,
+    #                 horizontalalignment='center',
+    #                 verticalalignment='center',
+    #                 c='white', size=8)
+    ax.set_xticks([])
+
+    return fig, ax
