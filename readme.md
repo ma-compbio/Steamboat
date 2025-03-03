@@ -40,8 +40,11 @@ sf.tools.leiden(adata, resolution=0.1)
 sf.tools.segment(adata, resolution=0.5)
 ```
 
-A [tiny simulation example](https://steamboat.readthedocs.io/en/latest/tutorial_nbs/tiny_simulation_example.html) is available in our documentation.
+## Examples
+A few examples in Jupyter notebook are included in the examples folder: 
+- [Illustration (simulated)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex0_tiny_simulation.ipynb)
+- [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
+- [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
 
 ## Documentation
 For the full API and real data examples, please visit our [documentation](https://steamboat.readthedocs.io/en/latest/).
-
