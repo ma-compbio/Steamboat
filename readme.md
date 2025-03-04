@@ -2,7 +2,13 @@
 
 [![Documentation Status](https://readthedocs.org/projects/steamboat/badge/?version=latest)](https://steamboat.readthedocs.io/en/latest/?badge=latest)
 
-Steamboat is a computational model to decipher short- and long-distance cellular interactions based on the multi-head attention mechanism. 
+Steamboat is an interpretable machine learning framework leveraging a self-supervised, multi-head attention model that uniquely decomposes the gene expression of a cell into multiple key factors:
+- intrinsic cell programs,
+- neighboring cell communication, and 
+- long-range interactions.
+
+These pieces of information are used to generate cell embedding, cell network, and reconstructed gene expression.
+
 ![fig1-v3-abstract](https://github.com/user-attachments/assets/0fc4cbe1-b43c-48dc-9397-81881d2ecda7)
 
 ## Basic workflow
