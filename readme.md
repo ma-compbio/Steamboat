@@ -48,7 +48,8 @@ A few examples in Jupyter notebook are included in the examples folder:
 2. [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
 3. Mouse brain
    - [Training](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_train.ipynb)
-   - [Spatial perturbation](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_spatial_perturbation.ipynb)
+   - [Interpretation of results, such as clustering, segmentation, global attention explanation, and ligand-receptor analysis](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_interpretation.ipynb)
+   - [Spatial perturbation, including cell transplant and environmental knock-out](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_spatial_perturbation.ipynb)
 4. [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
 
 Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing).
