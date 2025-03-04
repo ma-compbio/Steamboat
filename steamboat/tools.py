@@ -453,11 +453,118 @@ def plot_wq(model: Steamboat, chosen_features: List[str], figsize=(3, 3)):
 
 plot_vq = plot_wq # quick fix for a typo...
 
+
+def plot_all_transforms2(model, top: int = 3, reorder: bool = False, 
+                    figsize: str | tuple[float, float] = 'auto', 
+                    vmin: float = 0., vmax: float = 1.,
+                    xticklabels: tuple[str, str, str] = ("environment", "center cell", 'reconstruction')):
+    """Plot all metagenes
+
+    :param model: Steamboat model
+    :param top: Number of top genes per metagene to plot, defaults to 3
+    :param reorder: Reorder the genes by metagene, or keep the orginal ordering, defaults to False
+    :param figsize: Size of the figure, defaults to 'auto'
+    :param vmin: minimum value in the color bar, defaults to 0.
+    :param vmax: maximum value in the color bar, defaults to 1.
+    """
+    assert model.spatial_gather.n_scales == 2, "This function is only for `scale == 2`. For `scale == 3`, use `plot_all_transforms`."
+
+    n_heads = model.spatial_gather.n_heads
+
+    q = model.spatial_gather.q.weight.detach().cpu()
+    k = model.spatial_gather.k_local.weight.detach().cpu()
+    v = model.spatial_gather.v.weight.detach().cpu().T
+    # switch = model.spatial_gather.switch().detach().cpu()
+
+    if top > 0:
+        if reorder:
+            rank_v = np.argsort(-v, axis=1)[:, :top]
+            rank_q = np.argsort(-q, axis=1)[:, :top]
+            rank_k = np.argsort(-k, axis=1)[:, :top]
+            feature_mask = {}
+            for i in range(n_heads):
+                for j in rank_k[i, :]:
+                    feature_mask[j] = None
+                for j in rank_q[i, :]:
+                    feature_mask[j] = None
+                for j in rank_v[i, :]:
+                    feature_mask[j] = None
+            feature_mask = list(feature_mask.keys())
+        else:
+            rank_v = np.rank(v)
+            rank_q = np.rank(q)
+            rank_k = np.rank(k)
+            max_rank = np.max(np.vstack([rank_v, rank_q, rank_k]), axis=0)
+            feature_mask = (max_rank > (max_rank.max() - 3))
+            
+        chosen_features = np.array(model.features)[feature_mask]
+    else:
+        feature_mask = list(range(len(model.features)))
+        chosen_features = np.array(model.features)
+
+    if figsize == 'auto':
+        figsize = (n_heads * 0.49 + 1 + .5, len(chosen_features) * 0.15 + 1.)
+    # print(figsize)
+    fig, axes = plt.subplots(1, n_heads + 1, sharey='row', sharex='col', figsize=figsize)
+    plot_axes = axes
+    # bar_axes = axes[0]
+    cbar_ax = plot_axes[-1].inset_axes([0.0, 0.1, 1.0, .8])
+    common_params = {'linewidths': .05, 'linecolor': 'gray', 'yticklabels': chosen_features, 
+                     'cmap': 'Reds', 'cbar_kws': {"orientation": "vertical"}, 'square': True,
+                     'vmax': vmax, 'vmin': vmin}
+
+    for i in range(0, n_heads):
+        title = ''
+        what = f'{i}'
+        
+        to_plot = np.vstack((k[i, feature_mask],
+                             q[i, feature_mask],
+                             v[i, feature_mask])).T
+        
+        true_vmax = to_plot.max(axis=0)
+        # print(true_vmax)
+        to_plot /= true_vmax
+ 
+        # bar_axes[i].bar(np.arange(len(true_vmax)) + .5, true_vmax)
+        # bar_axes[i].set_xticks(np.arange(len(true_vmax)) + .5, [''] * len(true_vmax), rotation=90)
+        # bar_axes[i].set_yscale('log')
+        # bar_axes[i].set_title(title, size=10, fontweight='bold')
+        # if i != 0:
+            # bar_axes[i].get_yaxis().set_visible(False)
+        # for pos in ['right', 'top', 'left']:
+        #     if pos == 'left' and i == 0:
+        #         continue
+        #     else:
+                # bar_axes[i].spines[pos].set_visible(False)
+        sns.heatmap(to_plot, xticklabels=xticklabels, ax=plot_axes[i], 
+                    **common_params, cbar_ax=cbar_ax)
+        plot_axes[i].set_xlabel(f"{what}")
+        
+    # All text straight up
+    for i in range(n_heads):
+        plot_axes[i].set_xticklabels(plot_axes[i].get_xticklabels(), rotation=90)
+
+    for i in range(1, n_heads):
+        plot_axes[i].get_yaxis().set_visible(False)
+
+    # Remove duplicate cbars
+    # bar_axes[-1].set_visible(False)
+
+    plot_axes[-1].get_yaxis().set_visible(False)
+    plot_axes[-1].get_xaxis().set_visible(False)
+    for pos in ['right', 'top', 'bottom', 'left']:
+        plot_axes[-1].spines[pos].set_visible(False)
+    # axes[-1].set_visible(False)
+
+    fig.align_xlabels()
+    plt.tight_layout()
+
+
 def plot_all_transforms(model: Steamboat, 
                    top: int = 3, head_order=None,
                    figsize: str | tuple[float, float] = 'auto',
                    chosen_features: List[str] = None):
-    """Plot all metagenes
+    """Plot all metagenes for `scale == 3`
 
     :param model: Steamboat model
     :param top: top genes per metagene to plot, defaults to 3
@@ -465,6 +572,8 @@ def plot_all_transforms(model: Steamboat,
     :param figsize: (width, height), defaults to 'auto'
     :param chosen_features: selected features to plot, defaults to None
     """
+    assert model.spatial_gather.n_scales == 3, "This function is only for `scale == 3`. For `scale == 2`, use `plot_all_transforms2`."
+
     if chosen_features is None:
         feature_mask = {}
         for d in head_order if head_order is not None else range(model.spatial_gather.n_heads):
