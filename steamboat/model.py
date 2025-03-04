@@ -79,11 +79,12 @@ class NonNegScale(nn.Module):
 
 
 class BilinearAttention(nn.Module):
-    def __init__(self, d_in, n_heads, n_scales=2, d_out=None):
+    def __init__(self, d_in: int, n_heads: int, n_scales: int = 2, d_out: int = None):
         """Bilinear attention layer
 
         :param d_in: number of input features
-        :param d_factors: number of factors
+        :param n_heads: number of heads
+        :param n_scales: number of scales (default 2, i.e., ego and local; 3 will add global)
         :param d_out: _description_, defaults to None (meaning d_out = d_in)
         """
         super(BilinearAttention, self).__init__()
@@ -133,6 +134,8 @@ class BilinearAttention(nn.Module):
         """Score intrinsic factors. No attention to other cells/environment.
 
         :param q_emb: query scores
+        :param k_emb: key scores
+        :param activation: activation function
         :return: ego scores
         """
         scores = q_emb * k_emb
@@ -170,37 +173,17 @@ class BilinearAttention(nn.Module):
 
         return scores
 
-    def flat_k_penalty(self, kind: Literal['entropy', 'cosine', 'variance']):
-        """Scoring how homogeneous the k_emb is over all cells.
-        The score is the highest when the k_emb is the same for all cells. 
-        This will mean no difference between the local and ego attention.
-
-        :return: entropy penalty
-        """
-        if kind == 'entropy':
-            # Considering the scores of all cells, a higher entropy means more flat distribution
-            probs = self.k_local_emb / self.k_local_emb.sum(dim=-2, keepdim=True)
-            penalty = -(probs * torch.log(probs + 1e-9)).sum(dim=-2).mean()
-        if kind == 'cosine':
-            # More similar to an all-1 vector means more flat distribution
-            penalty = self.cosine_similarity(self.k_local_emb, torch.ones_like(self.k_local_emb)).mean()
-        if kind == 'variance':
-            # LESS variance means more flat distribution
-            probs = self.k_local_emb / self.k_local_emb.sum(dim=-2, keepdim=True)
-            penalty = -probs.var(dim=-2).mean()
-        return penalty
-
-    def l2_reg(self):
-        # No penalty on bias. Can't do this with weight_decay in optimizer
-        temp = 0.
-        temp += self.q.weight.square().sum(dim=-2).mean()
-        temp += self.k_local.weight.square().sum(dim=-2).mean()
-        temp += sum([k_regional.weight.square().sum(dim=-2).mean() 
-                     for k_regional in self.k_regionals])
-        temp += self.v.weight.square().sum(dim=-2).mean()
-        return temp
-
     def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False):
+        """Forward pass
+
+        :param adj_list: adjacency list for spatial graph
+        :param x: input data
+        :param masked_x: masked input data, defaults to None (i.e, using x)
+        :param regional_adj_lists: list of adjacency list for bipartite graph of cells - regions, defaults to None
+        :param regional_xs: list of mean expression of regions, defaults to None
+        :param get_details: whether to return details, defaults to False
+        :return: reconstructed gene expression
+        """
         assert isinstance(regional_xs, list), "regional_xs should be a list of regional features."
         if regional_adj_lists is None:
             regional_adj_lists = []
@@ -268,7 +251,7 @@ class Steamboat(nn.Module):
 
         :param features: feature names (usuall `adata.var_names` or a column in `adata.var` for gene symbols)
         :param n_heads: number of heads
-        :param n_scales: number of scales
+        :param n_scales: number of scales (default 2, i.e., ego and local; 3 will add global)
         """
         super(Steamboat, self).__init__()
 
