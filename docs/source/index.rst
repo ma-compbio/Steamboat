@@ -27,7 +27,7 @@ Source code for Steamboat is available as a `GitHub repository <https://github.c
    tutorials
    steamboat/modules
    contact
-
+   
 
 Indices and tables
 ==================
