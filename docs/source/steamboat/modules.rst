@@ -29,6 +29,14 @@ steamboat.utils module
    :undoc-members:
    :show-inheritance:
 
+steamboat.tools module
+------------------------
+
+.. automodule:: steamboat.tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 
