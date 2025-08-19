@@ -11,6 +11,42 @@ These pieces of information are used to generate cell embedding, cell network, a
 
 ![fig1-v3-abstract](https://github.com/user-attachments/assets/0fc4cbe1-b43c-48dc-9397-81881d2ecda7)
 
+## System requirements
+
+### Hardware
+Steamboat can run on a laptop, desktop, or server. 
+The experiments were done on a desktop computer with a 6-core Ryzen 5 3600 CPU and an RTX 3080 GPU. 
+A GPU can significantly reduce the time needed to train the models.
+
+### Operating system
+Steamboat is python-based and run on all mainsteam operating systems. It has been tested on Windows 10 and Springdale Linux.
+
+### Software dependencies
+| Package      | Tested with          |
+|--------------|----------------------|
+| Python       | 3.11.5               |
+| Torch        | 2.1.2 (w/ cuda 12.1) |
+| Scanpy       | 1.9.6                |
+| Squidpy      | 1.5.0                |
+| Scipy        | 1.11.4               |
+| Numpy        | 1.26.2               |
+| Networkx     | 3.1                  |
+| Matplotlib   | 3.8.0                |
+| Seaborn      | 0.13.2               |
+| Scikit-learn | 1.2.2                |
+
+### Installation
+Please install the required packages. If you have a GPU, consider installing [Pytorch with GPU support](https://pytorch.org/get-started/locally/).
+
+Steamboat can be imported directly after adding its directory to the path.
+```bash
+git clone https://github.com/ma-compbio/Steamboat
+```
+```python
+import sys
+sys.path.append("/path/of/the/cloned/repository")
+```
+
 ## Basic workflow
 ```python
 import steamboat as sf # "sf" = "Steamboat Factorization"
@@ -58,38 +94,3 @@ Data used in these examples are available in [Google Drive](https://drive.google
 
 ## Documentation
 For the full API and real data examples, please visit our [documentation](https://steamboat.readthedocs.io/en/latest/).
-
-## System requirements
-
-### Hardware
-Steamboat can run on a laptop, desktop, or server. 
-The experiments were done on a desktop computer with a 6-core Ryzen 5 3600 CPU and an RTX 3080 GPU. 
-A GPU can significantly reduce the time needed to train the models.
-
-### Operating system
-Steamboat is python-based and run on all mainsteam operating systems. It has been tested on Windows 10 and Springdale Linux.
-
-### Software dependencies
-| Package      | Tested with          |
-|--------------|----------------------|
-| Python       | 3.11.5               |
-| Torch        | 2.1.2 (w/ cuda 12.1) |
-| Scanpy       | 1.9.6                |
-| Squidpy      | 1.5.0                |
-| Scipy        | 1.11.4               |
-| Numpy        | 1.26.2               |
-| Networkx     | 3.1                  |
-| Matplotlib   | 3.8.0                |
-| Seaborn      | 0.13.2               |
-| Scikit-learn | 1.2.2                |
-
-### Installation
-Please install the required packages. Steamboat can be imported directly after adding its directory to path.
-```bash
-git clone https://github.com/ma-compbio/Steamboat
-```
-```python
-import sys
-sys.path.append("/path/of/the/cloned/repository")
-import steamboat
-```
