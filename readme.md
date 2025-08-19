@@ -36,7 +36,7 @@ Steamboat is python-based and run on all mainsteam operating systems. It has bee
 | Scikit-learn | 1.2.2                |
 
 ### Installation
-Please install the required packages. If you have a GPU, consider installing [Pytorch with GPU support](https://pytorch.org/get-started/locally/).
+Please install the required packages with `pip install -r requirements.txt`. If you have a GPU, consider installing [Pytorch with GPU support](https://pytorch.org/get-started/locally/).
 
 Steamboat can be imported directly after adding its directory to the path.
 ```bash
