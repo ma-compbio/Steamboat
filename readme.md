@@ -36,7 +36,13 @@ Steamboat is python-based and run on all mainsteam operating systems. It has bee
 | Scikit-learn | 1.2.2                |
 
 ### Installation
-Please install the required packages with `pip install -r requirements.txt`. If you have a GPU, consider installing [Pytorch with GPU support](https://pytorch.org/get-started/locally/).
+We recommend using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) to create an virtual environment.
+```bash
+conda create -n steamboat
+conda activate steamboat
+```
+Please follow the [official guide](https://pytorch.org/get-started/locally/) to install the appropriate Pytorch version for you system and hardware.
+Then, please install the required packages with `pip install -r requirements.txt`. 
 
 Steamboat can be imported directly after adding its directory to the path.
 ```bash
@@ -46,6 +52,8 @@ git clone https://github.com/ma-compbio/Steamboat
 import sys
 sys.path.append("/path/of/the/cloned/repository")
 ```
+
+The installation takes about a half hour.
 
 ## Basic workflow
 ```python
