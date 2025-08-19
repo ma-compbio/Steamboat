@@ -35,7 +35,7 @@ Steamboat is python-based and run on all mainsteam operating systems. It has bee
 | Seaborn      | 0.13.2               |
 | Scikit-learn | 1.2.2                |
 
-### Installation
+## Installation
 We recommend using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) to create an virtual environment.
 ```bash
 conda create -n steamboat
