@@ -53,7 +53,7 @@ import sys
 sys.path.append("/path/of/the/cloned/repository")
 ```
 
-The installation takes about a half hour.
+Depending on your network, installation may take 10 to 30 minutes.
 
 ## Basic workflow
 ```python
