@@ -98,7 +98,7 @@ A few examples in Jupyter notebook are included in the examples folder:
 
 The simulation demo takes about five minutes to run. The mouse brain data takes one hour to train. Other demos take about ten minutes each.
 
-Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing).
+Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing). Trained models are also uploaded.
 
 ## Documentation
 For the full API and real data examples, please visit our [documentation](https://steamboat.readthedocs.io/en/latest/).
