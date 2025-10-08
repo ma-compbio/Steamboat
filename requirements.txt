@@ -1,0 +1,8 @@
+scanpy
+squidpy
+scipy
+torch
+networkx
+matplotlib
+scikit-learn
+seaborn
