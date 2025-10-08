@@ -167,7 +167,7 @@ class BilinearAttention(nn.Module):
         # Normalize by the actual number of neighbors
         if adj_list.shape[0] == 3:
             actual_k = adj_list[2, :].reshape(q_emb.shape[0], nominal_k).sum(axis=1) # TODO: memorize this
-            scores = scores / actual_k[:, None, None] 
+            scores = scores / (actual_k[:, None, None] + 1e-6)
         else:
             scores = scores / nominal_k
 
@@ -293,7 +293,7 @@ class Steamboat(nn.Module):
         return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details)
 
     def fit(self, dataset: SteamboatDataset, 
-            entry_masking_rate: float = 0.0, feature_masking_rate: float = 0.0,
+            entry_masking_rate: float = 0.1, feature_masking_rate: float = 0.1,
             device:str = 'cuda', 
             *, 
             opt=None, opt_args=None, 
