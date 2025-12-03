@@ -367,6 +367,7 @@ class Steamboat(nn.Module):
                 loss = criterion(x_recon, x) / n_cells / n_genes
                 avg_loss += loss.item()
                 loss.backward()
+
                 # n_cells += x.shape[0]
                 # loss = loss * x.shape[0] / 10000 # handle size differences among datasets; larger dataset has higher weight
 
@@ -394,11 +395,13 @@ class Steamboat(nn.Module):
                 logger.info(f"Epoch {epoch + 1}: train_loss {avg_loss:.5f}")
             best_loss = min(best_loss, avg_loss)
 
+            self.training_loss_ = avg_loss
+
             # writer.add_scalar('Train_Loss', train_loss / len(loader), epoch)
             # writer.add_scalar('Learning_Rate', optimizer.state_dict()["param_groups"][0]["lr"], epoch)
             # scheduler.step()
         else:
-            logger.info(f"Maximum iterations reached.")
+            logger.info(f"Maximum iterations reached at epoch {epoch + 1}. train_loss {avg_loss:.5f}")
             
         self.eval()
         return self

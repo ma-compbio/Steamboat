@@ -12,6 +12,7 @@ import torch
 from .dataset import SteamboatDataset
 import scipy as sp
 from sklearn.metrics import roc_auc_score
+from sklearn.metrics import explained_variance_score
 from tqdm.auto import tqdm
 import squidpy as sq
 
@@ -58,10 +59,12 @@ def calc_head_weights(adatas, model: Steamboat):
     for i in range(len(adatas)):
         ego += np.mean(adatas[i].obsm['ego_attn'], axis=0)
         local += np.mean(adatas[i].obsm['local_attn'], axis=0)
-        regional += np.mean(adatas[i].obsm['global_attn_0'], axis=0)
-
-    matrix = np.vstack([ego, local, regional]) * calc_v_weights(model)
-
+        if 'global_attn_0' in adatas[i].obsm:
+            regional += np.mean(adatas[i].obsm['global_attn_0'], axis=0)
+    if 'global_attn_0' in adatas[i].obsm:
+        matrix = np.vstack([ego, local, regional]) * calc_v_weights(model)
+    else:
+        matrix = np.vstack([ego, local]) * calc_v_weights(model)
     return matrix
 
 
@@ -90,7 +93,10 @@ def plot_head_weights(head_weights, multiplier: float = 100, order=None, figsize
         sns.heatmap(matrix[:, order] * multiplier, vmax=10, ax=ax, linewidths=0.2, linecolor='grey', cmap='Reds', annot=True, fmt='.0f', square=True)
         ax.set_xticklabels(order, rotation=0)
     
-    ax.set_yticklabels(['ego', 'local', 'regional'], rotation=0)
+    if matrix.shape[0] == 3:
+        ax.set_yticklabels(['ego', 'local', 'regional'], rotation=0)
+    elif matrix.shape[0] == 2:
+        ax.set_yticklabels(['ego', 'local'], rotation=0)
 
     if save is not None and save != False:
         assert isinstance(save, str), "save must be a string."
@@ -113,11 +119,11 @@ def calc_interaction(adatas, model: Steamboat, sample_key: str, cell_type_key: s
         total_attnp = None
         for j in range(model.spatial_gather.n_heads):
             if total_attnp is None:
-                total_attnp = adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * 25
+                total_attnp = adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * model.spatial_gather.n_heads
             else:
-                total_attnp += adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * 25
-        
-        celltypes = sorted(adatas[i].obs['cell.types.nolc'].unique())
+                total_attnp += adatas[i].obsp[f'local_attn_{j}'] * v_weights[j] * model.spatial_gather.n_heads
+
+        celltypes = sorted(adatas[i].obs[cell_type_key].unique())
         celltype_attnp_df = pd.DataFrame(-1., index=celltypes, columns=celltypes)
         
         actual_min = float("inf")
@@ -126,7 +132,7 @@ def calc_interaction(adatas, model: Steamboat, sample_key: str, cell_type_key: s
             for celltype1 in celltype_attnp_df.columns:
                 mask1 = (adatas[i].obs[cell_type_key] == celltype1)
                 sub_attnp = total_attnp[mask0, :][:, mask1]
-                normalization_factor = sub_attnp.nnz + 20
+                normalization_factor = sub_attnp.nnz + pseudocount
                 # normalization_factor = np.prod(sub_attnp.shape)
                 if normalization_factor >= 1:
                     celltype_attnp_df.loc[celltype0, celltype1] = sub_attnp.sum() / normalization_factor
@@ -138,7 +144,7 @@ def calc_interaction(adatas, model: Steamboat, sample_key: str, cell_type_key: s
     return celltype_attnp_df_dict
 
 
-def calc_adjacency_freq(adatas, sample_key: str, cell_type_key: str):
+def calc_adjacency_freq(adatas, sample_key: str, cell_type_key: str, pseudocount: float = 20.):
     """Calculate baseline interaction matrix determined by adjacency frequency
 
     :param adatas: all adatas
@@ -151,10 +157,10 @@ def calc_adjacency_freq(adatas, sample_key: str, cell_type_key: str):
         k = adatas[i].obs[sample_key].unique().astype(str).item()
         adatas[i].obs[cell_type_key] = adatas[i].obs[cell_type_key].astype("category")
         sq.gr.interaction_matrix(adatas[i], cell_type_key, normalized=False)
-        temp = pd.DataFrame(adatas[i].uns['cell.types.nolc_interactions'], 
+        temp = pd.DataFrame(adatas[i].uns[f'{cell_type_key}_interactions'], 
                                             index=adatas[i].obs[cell_type_key].cat.categories, 
                                             columns=adatas[i].obs[cell_type_key].cat.categories)
-        normalization_factor = adatas[i].obs[cell_type_key].value_counts().sort_index() + 20
+        normalization_factor = adatas[i].obs[cell_type_key].value_counts().sort_index() + pseudocount
         adjacency_freq[k] = temp.div(normalization_factor, axis=0).div(normalization_factor, axis=1)
     return adjacency_freq
 
