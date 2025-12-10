@@ -1,5 +1,6 @@
-import sys
-sys.path.append('C:/Files/projects/Steamboat/')
+# import sys
+# sys.path.append('C:/Files/projects/Steamboat/')
+from pathlib import Path
 
 # %%
 import os
@@ -24,7 +25,8 @@ device = "cpu"
 
 # %%
 try:
-    adata = sc.read_h5ad("tests/data/simulation.h5ad")
+    test_dir = Path(__file__).parent
+    adata = sc.read_h5ad(test_dir / "data/simulation.h5ad")
     adata.obs['global'] = 0
     adata
 except Exception as e:
