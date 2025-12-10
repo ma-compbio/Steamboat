@@ -3,6 +3,7 @@ squidpy
 scipy
 torch
 networkx
+igraph
 matplotlib
 scikit-learn
 seaborn
