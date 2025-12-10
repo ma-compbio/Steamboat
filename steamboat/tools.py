@@ -67,6 +67,28 @@ def calc_head_weights(adatas, model: Steamboat):
         matrix = np.vstack([ego, local]) * calc_v_weights(model)
     return matrix
 
+def calc_head_weights_quantile(adatas, model: Steamboat, quantile: float = 0.9):
+    """Calculate weights of heads and scales within each head
+
+    :param adatas: all adatas
+    :param model: the trained Steamboat model
+    :return: weights
+    """
+    ego = 0
+    local = 0
+    regional = 0
+
+    for i in range(len(adatas)):
+        ego += np.quantile(adatas[i].obsm['ego_attn'], quantile, axis=0)
+        local += np.quantile(adatas[i].obsm['local_attn'], quantile, axis=0)
+        if 'global_attn_0' in adatas[i].obsm:
+            regional += np.quantile(adatas[i].obsm['global_attn_0'], quantile, axis=0)
+    if 'global_attn_0' in adatas[i].obsm:
+        matrix = np.vstack([ego, local, regional])# * calc_v_weights(model)
+    else:
+        matrix = np.vstack([ego, local])# * calc_v_weights(model)
+    return matrix
+
 
 def plot_head_weights(head_weights, multiplier: float = 100, order=None, figsize=(7, 0.8), heatmap_kwargs=None, save: str = None):
     """Plot head weights calculated by calc_head_weights
@@ -181,9 +203,85 @@ def calc_var(model: Steamboat):
             [f'k_local_{i}' for i in range(n_heads)] + 
             [f'k_global_{i}' for i in range(n_heads)] + 
             [f'v_{i}' for i in range(n_heads)])
-
+    
     return pd.DataFrame(np.vstack([q, k_local, k_global, v]), 
                         index=index, columns=model.features).T
+
+
+def find_top_celltypes(adata, obs_key: str, top: int = 3, return_raw: bool = True):
+    """Find top contributing cell types for each metagene by mean scores
+
+    :param adata: AnnData object with cell type information
+    :param obs_key: obs key for cell types
+    :param top: top cell types per metagene to find, defaults to 3
+    :return: list of lists of top cell types per metagene
+    """
+    celltypes = sorted(adata.obs[obs_key].unique().astype(str))
+    celltype_masks = {}
+    for celltype in celltypes:
+        celltype_masks[celltype] = (adata.obs[obs_key] == celltype).values
+
+    heads = adata.obsm['q'].shape[1]
+    q_celltypes = [[] for _ in range(heads)]
+
+    for head in range(heads):
+        scores = {}
+        for celltype in celltypes:
+            mask = celltype_masks[celltype]
+            scores[celltype] = adata.obsm['q'][mask, head].mean()
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top_celltypes = [item[0] for item in sorted_scores[:top]]
+        q_celltypes[head] = top_celltypes
+    
+    k_local_celltypes = [[] for _ in range(heads)]
+    for head in range(heads):
+        scores = {}
+        for celltype in celltypes:
+            mask = celltype_masks[celltype]
+            scores[celltype] = adata.obsm['local_k'][mask, head].mean()
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top_celltypes = [item[0] for item in sorted_scores[:top]]
+        k_local_celltypes[head] = top_celltypes
+    
+    if return_raw:
+        return q_celltypes, k_local_celltypes
+    else:
+        return pd.DataFrame({'q': q_celltypes, 'local_k': k_local_celltypes})
+
+
+def find_top_lrs(var: pd.DataFrame, lr: pd.DataFrame, top: int = 3, return_raw: bool = True):
+    """Find top contributing ligand-receptor pairs for each metagene
+
+    :param var: var from `calc_var(model)`
+    :param top: top genes per metagene to find, defaults to 3
+    :return: list of lists of top genes per metagene
+    """
+    l_mask = lr['ligand'].isin(var.index)
+    r_mask = lr['receptor'].isin(var.index)
+    lr_mask = l_mask & r_mask
+    mylr = lr.loc[lr_mask, :]
+    lr_genes = set(mylr['ligand']).union(set(mylr['receptor']))
+    myvar = var.loc[var.index.isin(lr_genes), :]
+    
+    heads = len(var.columns) / 4
+    lrs = [[] for _ in range(int(heads))]
+    for head in range(int(heads)):
+        scores = {}
+        for _, row in mylr.iterrows():
+            ligand = row['ligand']
+            receptor = row['receptor']
+            score = myvar.loc[ligand, f'q_{head}'] * myvar.loc[receptor, f'k_local_{head}']
+            scores[f'{ligand}-{receptor}'] = score
+            score = myvar.loc[receptor, f'q_{head}'] * myvar.loc[ligand, f'k_local_{head}']
+            scores[f'{receptor}-{ligand}'] = score
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top_lrs = [item[0] for item in sorted_scores[:top]]
+        lrs[head] = top_lrs
+
+    if return_raw:
+        return lrs
+    else:
+        return pd.DataFrame({'lr_pairs': lrs})
 
 
 def calc_geneset_auroc(metagenes, genesets):
@@ -253,6 +351,131 @@ def plot_geneset_auroc(sig_df, order, figsize=(8, 5)):
     fig.tight_layout()
     return fig, ax
 
+def explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
+    """Calculate explained variance for each scale
+
+    :param model: Steamboat model
+    :param dataset: SteamboatDataset object to be processed
+    :param adatas: list of AnnData objects corresponding to the dataset
+    :param device: Device to run the model, defaults to 'cuda'
+    :return: explained variance scores in a dictionary
+    """
+    # Safeguards
+    assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
+    for i, (adata, data) in enumerate(zip(adatas, dataset)):
+        assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
+
+    # Calculate embeddings and attention scores for each slide
+    total_mean = 0
+    total_variance = 0
+    total_n_cells = 0
+    for x, _, _, _ in dataset:
+        total_mean += x.sum(dim=0).cpu().numpy()
+        total_n_cells += x.shape[0]
+    total_mean /= total_n_cells
+    
+    for x, _, _, _ in dataset:
+        total_variance += ((x - torch.tensor(total_mean).to(x.device)) ** 2).sum(dim=0).cpu().numpy()
+    total_variance /= total_n_cells
+
+    total_evs = {'ego': 0, 'local': 0, 'global': 0, 'full': 0}
+    full_evs = 0.
+    total_marginal_evs = {'ego': 0, 'local': 0, 'global': 0}
+    for i, (x, adj_list, regional_xs, regional_adj_lists) in tqdm(enumerate(dataset), total=len(dataset)):
+        adj_list = adj_list.squeeze(0).to(device)
+        x = x.squeeze(0).to(device)
+        regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
+        regional_xs = [regional_x.to(device) for regional_x in regional_xs]
+        
+        with torch.no_grad():
+            res = model(adj_list, x, x, regional_adj_lists, regional_xs, get_details=False)
+            full_evs += ((x - res) ** 2).sum(axis=0).cpu().numpy()
+            for scale in ['ego', 'local', 'global']:
+                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                            get_details=False, explained_variance_mask=scale)
+                total_evs[scale] += ((x - res) ** 2).sum(axis=0).cpu().numpy()
+                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                            get_details=False, explained_variance_mask='no ' + scale)
+                total_marginal_evs[scale] += ((x - res) ** 2).sum(axis=0).cpu().numpy()
+        
+    avg_evs = {}
+    avg_evs['full'] = 1 - (full_evs / total_n_cells).sum() / total_variance.sum()
+    for scale in ['ego', 'local', 'global']:
+        # variance_weighted_evs[scale] = 1 - (total_evs[scale] / total_n_cells).sum() / total_variance.sum()
+        avg_evs[scale] = 1 - (total_marginal_evs[scale] / total_n_cells).sum() / total_variance.sum()
+        avg_evs[scale] = avg_evs['full'] - avg_evs[scale]
+    evs = {}
+    evs['full'] = 1 - full_evs / total_n_cells / total_variance
+    for scale in ['ego', 'local', 'global']:
+        evs[scale] = 1 - total_evs[scale] / total_n_cells / total_variance
+        evs[scale] = 1 - total_marginal_evs[scale] / total_n_cells / total_variance
+        evs[scale] = evs['full'] - evs[scale]
+    
+    for i in avg_evs:
+        avg_evs[i] = float(avg_evs[i])
+
+    return evs, avg_evs
+
+def sequential_explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
+    """Calculate explained variance for each scale
+
+    :param model: Steamboat model
+    :param dataset: SteamboatDataset object to be processed
+    :param adatas: list of AnnData objects corresponding to the dataset
+    :param device: Device to run the model, defaults to 'cuda'
+    :return: explained variance scores in a dictionary
+    """
+    # Safeguards
+    assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
+    for i, (adata, data) in enumerate(zip(adatas, dataset)):
+        assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
+
+    # Calculate embeddings and attention scores for each slide
+    total_mean = 0
+    total_variance = 0
+    total_n_cells = 0
+    for x, _, _, _ in dataset:
+        total_mean += x.sum(dim=0).cpu().numpy()
+        total_n_cells += x.shape[0]
+    total_mean /= total_n_cells
+    
+    for x, _, _, _ in dataset:
+        total_variance += ((x - torch.tensor(total_mean).to(x.device)) ** 2).sum(dim=0).cpu().numpy()
+    total_variance /= total_n_cells
+
+    total_evs = {'ego': 0, 'ego+local': 0, 'full': 0}
+    for i, (x, adj_list, regional_xs, regional_adj_lists) in tqdm(enumerate(dataset), total=len(dataset)):
+        adj_list = adj_list.squeeze(0).to(device)
+        x = x.squeeze(0).to(device)
+        regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
+        regional_xs = [regional_x.to(device) for regional_x in regional_xs]
+        
+        with torch.no_grad():
+            for scale in ['ego', 'ego+local', 'full']:
+                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                            get_details=False, explained_variance_mask=scale)
+                total_evs[scale] += ((x - res) ** 2).sum(axis=0).cpu().numpy()
+        
+    avg_evs = {}
+    avg_evs['full'] = 1 - total_evs['full'].sum() / total_n_cells / total_variance.sum()
+    avg_evs['ego'] = 1 - (total_evs['ego']).sum() / total_n_cells / total_variance.sum()
+    avg_evs['ego+local'] = 1 - (total_evs['ego+local']).sum() / total_n_cells / total_variance.sum()
+    avg_evs['local'] = avg_evs['ego+local'] - avg_evs['ego']
+    avg_evs['global'] = avg_evs['full'] - avg_evs['ego+local']
+    del avg_evs['ego+local']  # remove redundant entry
+
+    evs = {}
+    evs['full'] = 1 - total_evs['full'] / total_n_cells / total_variance
+    evs['ego'] = 1 - total_evs['ego'] / total_n_cells / total_variance
+    evs['ego+local'] = 1 - total_evs['ego+local'] / total_n_cells / total_variance
+    evs['local'] = evs['ego+local'] - evs['ego']
+    evs['global'] = evs['full'] - evs['ego+local']
+    del evs['ego+local']  # remove redundant entry
+    
+    for i in avg_evs:
+        avg_evs[i] = float(avg_evs[i])
+    return evs, avg_evs
+
 def calc_obs(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steamboat, 
                     device='cuda', get_recon: bool = False):
     """Calculate and store the embeddings and attention scores in the AnnData objects
@@ -265,7 +488,7 @@ def calc_obs(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steambo
     """
     # Safeguards
     assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
-    for adata, data in zip(adatas, dataset):
+    for i, (adata, data) in enumerate(zip(adatas, dataset)):
         assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
 
     # Calculate embeddings and attention scores for each slide
@@ -353,14 +576,14 @@ def gather_obs(adata: sc.AnnData, adatas: list[sc.AnnData]):
 
 
 def neighbors(adata: sc.AnnData,
-              use_rep: str = 'X_local_q', 
+              use_rep: str = 'attn', 
               key_added: str = 'steamboat_emb',
               metric='cosine', 
               neighbors_kwargs: dict = None):
     """A thin wrapper for scanpy.pp.neighbors for Steamboat functionalities
 
     :param adata: AnnData object to be processed
-    :param use_rep: embedding to be used, 'X_local_q' or 'X_local_attn' (if very noisy data), defaults to 'X_local_q'
+    :param use_rep: embedding to be used, defaults to 'attn'
     :param key_added: key in obsp to store the resulting similarity graph, defaults to 'steamboat_emb'
     :param metric: metric for similarity graph, defaults to 'cosine'
     :param neighbors_kwargs: Other parameters for scanpy.pp.neighbors if desired, defaults to None

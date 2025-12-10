@@ -173,7 +173,8 @@ class BilinearAttention(nn.Module):
 
         return scores
 
-    def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False):
+    def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False,
+                explained_variance_mask=None):
         """Forward pass
 
         :param adj_list: adjacency list for spatial graph
@@ -215,12 +216,35 @@ class BilinearAttention(nn.Module):
         sum_score = ego_score + sum_local_score + sum(sum_regional_scores) # n * h
         normalization_factor = sum_score.sum(axis=-1, keepdim=True) + 1e-9 # n * 1
 
-        sum_attn = sum_score / normalization_factor
+        if explained_variance_mask is None:
+            sum_attn = sum_score / normalization_factor
+        else:
+            if explained_variance_mask == 'ego':
+                sum_attn = ego_score / normalization_factor
+            elif explained_variance_mask == 'local':
+                sum_attn = sum_local_score / normalization_factor
+            elif explained_variance_mask == 'ego+local':
+                sum_attn = (ego_score + sum_local_score) / normalization_factor
+            elif explained_variance_mask == 'global':
+                sum_attn = sum(sum_regional_scores) / normalization_factor
+            elif explained_variance_mask == 'no ego':
+                sum_attn = (sum_local_score + sum(sum_regional_scores)) / normalization_factor
+            elif explained_variance_mask == 'no local':
+                sum_attn = (ego_score + sum(sum_regional_scores)) / normalization_factor
+            elif explained_variance_mask == 'no global':
+                sum_attn = (ego_score + sum_local_score) / normalization_factor
+            elif explained_variance_mask == 'full':
+                sum_attn = sum_score / normalization_factor
+            else:
+                raise ValueError(f"Unknown explained_variance_mask: {explained_variance_mask}")
+        
+        # Reconstruct
         # res = self.bias(self.v(sum_attn))
         # sum_attn = self.attn_shortcut(x)
         res = self.v(sum_attn)
         # res = self.v_shortcut(sum_attn)
 
+        # Remember variables for later inspection
         self.q_emb = q_emb
         self.k_local_emb = k_local_emb
         self.k_regional_embs = k_regional_embs
@@ -289,8 +313,8 @@ class Steamboat(nn.Module):
                 out_xs.append(x)
         return out_x, out_xs
 
-    def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False):
-        return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details)
+    def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False, explained_variance_mask=None):
+        return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details, explained_variance_mask)
 
     def fit(self, dataset: SteamboatDataset, 
             entry_masking_rate: float = 0.1, feature_masking_rate: float = 0.1,
@@ -406,7 +430,7 @@ class Steamboat(nn.Module):
         self.eval()
         return self
 
-    def transform(self, x, adj_matrix):
+    def transform(self, x, adj_matrix, get_details=True, explained_variance_mask=None):
         self.eval()
         with torch.no_grad():
             if not isinstance(x, torch.Tensor):
@@ -414,7 +438,7 @@ class Steamboat(nn.Module):
             if not isinstance(adj_matrix, torch.Tensor):
                 adj_matrix = torch.Tensor(adj_matrix)
             
-            return self(adj_matrix, x, get_details=True)
+            return self(adj_matrix, x, get_details=True, explained_variance_mask=explained_variance_mask)
 
 
     def get_bias(self) -> np.array:

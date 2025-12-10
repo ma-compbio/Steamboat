@@ -46,7 +46,7 @@ def _create_loss(loss_fn, alpha_l=3):
     if loss_fn == 'crossentropy':
         loss = nn.CrossEntropyLoss()
     elif loss_fn == 'sce':
-        loss = partial(sce_loss, alpha=alpha_l)
+        loss = partial(_sce_loss, alpha=alpha_l)
     elif loss_fn == "mse":
         loss = nn.MSELoss()    
     return loss
