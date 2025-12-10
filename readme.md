@@ -1,6 +1,6 @@
 # Steamboat
 
-[![Documentation Status](https://readthedocs.org/projects/steamboat/badge/?version=latest)](https://steamboat.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/steamboat/badge/?version=latest)](https://steamboat.readthedocs.io/en/latest/?badge=latest) [![Unit and integration tests](https://github.com/ma-compbio/Steamboat/actions/workflows/tests.yml/badge.svg)](https://github.com/ma-compbio/Steamboat/actions/workflows/tests.yml)
 
 Steamboat is an interpretable machine learning framework leveraging a self-supervised, multi-head attention model that uniquely decomposes the gene expression of a cell into multiple key factors:
 - intrinsic cell programs,
