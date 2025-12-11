@@ -15,8 +15,8 @@ These pieces of information are used to generate cell embedding, cell network, a
 
 ### Hardware
 Steamboat can run on a laptop, desktop, or server. 
-The experiments were done on a desktop computer with a 6-core Ryzen 5 3600 CPU and an RTX 3080 GPU. 
-A GPU can significantly reduce the time needed to train the models.
+The experiments were done on a desktop computer with an RTX 3080 GPU (10GB VRAM). 
+A GPU can significantly reduce the time needed to train the models (more than 5x on the most demanding examples).
 
 ### Operating system
 Steamboat is python-based and run on all mainsteam operating systems. It has been tested on Windows 10 and Springdale Linux.
