@@ -36,5 +36,7 @@ dependencies = [
 Homepage = "https://github.com/ma-compbio/Steamboat"
 Issues = "https://github.com/ma-compbio/Steamboat/issues"
 
-[tool.setuptools]
-py-modules = ["steamboat"]
+[tool.setuptools.packages.find]
+where = ["."]  # Look in the current directory
+include = ["steamboat*"]  # Include the folder named 'steamboat'
+namespaces = false  # (Optional) Prevents installing implicit namespace packages
