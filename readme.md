@@ -22,29 +22,56 @@ A GPU can significantly reduce the time needed to train the models (more than 5x
 Steamboat is python-based and run on all mainsteam operating systems. It has been tested on Windows 10 and Springdale Linux.
 
 ### Software dependencies
-| Package      | Tested with          |
-|--------------|----------------------|
-| Python       | 3.11.5               |
-| Torch        | 2.1.2 (w/ cuda 12.1) |
-| Scanpy       | 1.9.6                |
-| Squidpy      | 1.5.0                |
-| Scipy        | 1.11.4               |
-| Numpy        | 1.26.2               |
-| Networkx     | 3.1                  |
-| Matplotlib   | 3.8.0                |
-| Seaborn      | 0.13.2               |
-| Scikit-learn | 1.2.2                |
+
+<details>
+
+<summary>Lastest tested working dependency combination</summary>
+
+| Package      | Tested in 06/2025    | Tested in 12/2025    |
+|--------------|----------------------|----------------------|
+| Python       | 3.11.5               | 3.19.9               |
+| Torch        | 2.1.2 (w/ cuda 12.1) | 2.9.1 (w/ cuda 13.0) |
+| Scanpy       | 1.9.6                | 1.11.5               |
+| Squidpy      | 1.5.0                | 1.6.6                |
+| Scipy        | 1.11.4               | 1.16.3               |
+| Numpy        | 1.26.2               | 2.3.1                |
+| Networkx     | 3.1                  | 3.5                  |
+| Matplotlib   | 3.8.0                | 3.10.6               |
+| Seaborn      | 0.13.2               | 0.13.2               |
+| Scikit-learn | 1.2.2                | 1.7.2                |
+
+</details>
 
 ## Installation
-We recommend using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) to create an virtual environment.
+We recommend using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) to create a virtual environment.
 ```bash
-conda create -n steamboat
+conda create -n steamboat python=3.13
 conda activate steamboat
+pip install steamboat-bio
 ```
-Please follow the [official guide](https://pytorch.org/get-started/locally/) to install the appropriate Pytorch version for you system and hardware.
-Then, please install the required packages with `pip install -r requirements.txt`. 
+Installation usually takes about 2 minutes, but can vary depending on computer and network conditions.
 
-Steamboat can be imported directly after adding its directory to the path.
+<details>
+
+<summary>Tips for GPU support</summary>
+
+Before running `pip install steamboat-bio`, follow the [official guide](https://pytorch.org/get-started/locally/) to install the appropriate Pytorch version for your system and hardware.
+The exact commands will depend on your hardware and system. In general, they look like this.
+
+```bash
+conda create -n steamboat python=3.13
+conda activate steamboat
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130 # DO NOT RUN. ADJUST IT FOR YOUR SYSTEM.
+pip install steamboat-bio
+```
+
+</details>
+
+<details>
+
+<summary>Run without installation</summary>
+
+If you are interested in modifying the package, or just don't feel like installing it, Steamboat can be imported directly after adding its directory to the path.
 ```bash
 git clone https://github.com/ma-compbio/Steamboat
 ```
@@ -53,7 +80,9 @@ import sys
 sys.path.append("/path/of/the/cloned/repository")
 ```
 
-Depending on your network, installation may take 10 to 30 minutes.
+You may need to install the dependencies listed in `requirements.txt` manually.
+
+</details>
 
 ## Basic workflow
 ```python
@@ -70,7 +99,7 @@ dataset = sf.make_dataset(adatas)
 Create a `Steamboat` model and fit it to the data.
 ```python
 model = sf.Steamboat(short_features, n_heads=10, n_scales=3)
-model = model.to("cuda") # if you GPU acceleration is supported.
+model = model.to("cuda") # if GPU acceleration is supported.
 model.fit(dataset)
 ```
 
