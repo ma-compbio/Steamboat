@@ -1,5 +1,5 @@
-import sys
-sys.path.append('C:/Files/projects/Steamboat/')
+# import sys
+# sys.path.append('C:/Files/projects/Steamboat/')
 from pathlib import Path
 
 # %%
