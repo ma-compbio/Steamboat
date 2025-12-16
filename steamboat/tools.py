@@ -416,6 +416,57 @@ def explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, ada
 
     return evs, avg_evs
 
+def contribution_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
+    """Calculate explained variance for each scale
+
+    :param model: Steamboat model
+    :param dataset: SteamboatDataset object to be processed
+    :param adatas: list of AnnData objects corresponding to the dataset
+    :param device: Device to run the model, defaults to 'cuda'
+    :return: explained variance scores in a dictionary
+    """
+    # Safeguards
+    assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
+    for i, (adata, data) in enumerate(zip(adatas, dataset)):
+        assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
+
+    # Calculate embeddings and attention scores for each slide
+    total_n_cells = 0
+    raw_gene_weight = 0
+    for x, _, _, _ in dataset:
+        total_n_cells += x.shape[0]
+        raw_gene_weight += x.sum(axis=0).cpu().numpy()
+
+    raw_gene_weight /= total_n_cells
+    gene_weight = raw_gene_weight / raw_gene_weight.sum()
+
+    contrib = {'ego': 0, 'local': 0, 'global': 0, 'full': 0}
+    for i, (x, adj_list, regional_xs, regional_adj_lists) in tqdm(enumerate(dataset), total=len(dataset)):
+        adj_list = adj_list.squeeze(0).to(device)
+        x = x.squeeze(0).to(device)
+        regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
+        regional_xs = [regional_x.to(device) for regional_x in regional_xs]
+        
+        with torch.no_grad():
+            res = model(adj_list, x, x, regional_adj_lists, regional_xs, get_details=False)
+            res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                            get_details=False, explained_variance_mask=None)
+            contrib['full'] += res.sum(axis=0).cpu().numpy() / raw_gene_weight / total_n_cells
+            for scale in ['ego', 'local', 'global']:
+                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                            get_details=False, explained_variance_mask=scale)
+                contrib[scale] += res.sum(axis=0).cpu().numpy() /raw_gene_weight / total_n_cells
+        
+    avg_contrib = {}
+    avg_contrib['full'] = (contrib['full'] * gene_weight).sum()
+    for scale in ['ego', 'local', 'global']:
+        avg_contrib[scale] = (contrib[scale] * gene_weight).sum()
+    
+    for i in avg_contrib:
+        avg_contrib[i] = float(avg_contrib[i])
+
+    return contrib, avg_contrib
+
 def sequential_explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
     """Calculate explained variance for each scale
 
