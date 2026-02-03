@@ -5,6 +5,8 @@ name: Unit and integration tests
 
 on:
   push:
+    paths:
+      - 'steamboat/**'
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
