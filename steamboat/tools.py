@@ -438,6 +438,7 @@ def contribution_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: l
         total_n_cells += x.shape[0]
         raw_gene_weight += x.sum(axis=0).cpu().numpy()
 
+    raw_gene_weight[raw_gene_weight == 0] = 1e-2  # avoid division by zero
     raw_gene_weight /= total_n_cells
     gene_weight = raw_gene_weight / raw_gene_weight.sum()
 
@@ -489,6 +490,7 @@ def contribution_by_scale_and_head(model: Steamboat, dataset: SteamboatDataset,
         total_n_cells += x.shape[0]
         raw_gene_weight += x.sum(axis=0).cpu().numpy()
 
+    raw_gene_weight[raw_gene_weight == 0] = 1e-2  # avoid division by zero
     raw_gene_weight /= total_n_cells
     gene_weight = raw_gene_weight / raw_gene_weight.sum()
 
@@ -510,7 +512,7 @@ def contribution_by_scale_and_head(model: Steamboat, dataset: SteamboatDataset,
                 for scale in ['ego', 'local', 'global']:
                     res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
                                 get_details=False, explained_variance_mask=scale, chosen_head=h)
-                    contrib[scale] += res.sum(axis=0).cpu().numpy() /raw_gene_weight / total_n_cells
+                    contrib[scale] += res.sum(axis=0).cpu().numpy() / raw_gene_weight / total_n_cells
             
         contrib_by_head.append(contrib)
         avg_contrib = {}
