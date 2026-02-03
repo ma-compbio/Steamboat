@@ -530,66 +530,6 @@ def contribution_by_scale_and_head(model: Steamboat, dataset: SteamboatDataset,
     }
     return contrib_by_head, avg_contrib_by_head
 
-def sequential_explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
-    """Calculate explained variance for each scale
-
-    :param model: Steamboat model
-    :param dataset: SteamboatDataset object to be processed
-    :param adatas: list of AnnData objects corresponding to the dataset
-    :param device: Device to run the model, defaults to 'cuda'
-    :return: explained variance scores in a dictionary
-    """
-    # Safeguards
-    assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
-    for i, (adata, data) in enumerate(zip(adatas, dataset)):
-        assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
-
-    # Calculate embeddings and attention scores for each slide
-    total_mean = 0
-    total_variance = 0
-    total_n_cells = 0
-    for x, _, _, _ in dataset:
-        total_mean += x.sum(dim=0).cpu().numpy()
-        total_n_cells += x.shape[0]
-    total_mean /= total_n_cells
-    
-    for x, _, _, _ in dataset:
-        total_variance += ((x - torch.tensor(total_mean).to(x.device)) ** 2).sum(dim=0).cpu().numpy()
-    total_variance /= total_n_cells
-
-    total_evs = {'ego': 0, 'ego+local': 0, 'full': 0}
-    for i, (x, adj_list, regional_xs, regional_adj_lists) in tqdm(enumerate(dataset), total=len(dataset)):
-        adj_list = adj_list.squeeze(0).to(device)
-        x = x.squeeze(0).to(device)
-        regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
-        regional_xs = [regional_x.to(device) for regional_x in regional_xs]
-        
-        with torch.no_grad():
-            for scale in ['ego', 'ego+local', 'full']:
-                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
-                            get_details=False, explained_variance_mask=scale)
-                total_evs[scale] += ((x - res) ** 2).sum(axis=0).cpu().numpy()
-        
-    avg_evs = {}
-    avg_evs['full'] = 1 - total_evs['full'].sum() / total_n_cells / total_variance.sum()
-    avg_evs['ego'] = 1 - (total_evs['ego']).sum() / total_n_cells / total_variance.sum()
-    avg_evs['ego+local'] = 1 - (total_evs['ego+local']).sum() / total_n_cells / total_variance.sum()
-    avg_evs['local'] = avg_evs['ego+local'] - avg_evs['ego']
-    avg_evs['global'] = avg_evs['full'] - avg_evs['ego+local']
-    del avg_evs['ego+local']  # remove redundant entry
-
-    evs = {}
-    evs['full'] = 1 - total_evs['full'] / total_n_cells / total_variance
-    evs['ego'] = 1 - total_evs['ego'] / total_n_cells / total_variance
-    evs['ego+local'] = 1 - total_evs['ego+local'] / total_n_cells / total_variance
-    evs['local'] = evs['ego+local'] - evs['ego']
-    evs['global'] = evs['full'] - evs['ego+local']
-    del evs['ego+local']  # remove redundant entry
-    
-    for i in avg_evs:
-        avg_evs[i] = float(avg_evs[i])
-    return evs, avg_evs
-
 def calc_obs(adatas: list[sc.AnnData], dataset: SteamboatDataset, model: Steamboat, 
                     device='cuda', get_recon: bool = False):
     """Calculate and store the embeddings and attention scores in the AnnData objects
