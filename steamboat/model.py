@@ -174,7 +174,7 @@ class BilinearAttention(nn.Module):
         return scores
 
     def forward(self, adj_list, x, masked_x=None, regional_adj_lists=None, regional_xs=None, get_details=False,
-                explained_variance_mask=None):
+                explained_variance_mask=None, chosen_head=None):
         """Forward pass
 
         :param adj_list: adjacency list for spatial graph
@@ -238,6 +238,12 @@ class BilinearAttention(nn.Module):
             else:
                 raise ValueError(f"Unknown explained_variance_mask: {explained_variance_mask}")
         
+        if chosen_head is None:
+            pass
+        else:
+            sum_attn[:, :chosen_head] = 0.
+            sum_attn[:, chosen_head + 1:] = 0.
+
         # Reconstruct
         # res = self.bias(self.v(sum_attn))
         # sum_attn = self.attn_shortcut(x)
@@ -313,8 +319,10 @@ class Steamboat(nn.Module):
                 out_xs.append(x)
         return out_x, out_xs
 
-    def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False, explained_variance_mask=None):
-        return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details, explained_variance_mask)
+    def forward(self, adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details=False, 
+                explained_variance_mask=None, chosen_head=None):
+        return self.spatial_gather(adj_list, x, masked_x, regional_adj_lists, regional_xs, get_details, 
+                                   explained_variance_mask, chosen_head)
 
     def fit(self, dataset: SteamboatDataset, 
             entry_masking_rate: float = 0.1, feature_masking_rate: float = 0.1,

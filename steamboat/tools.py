@@ -1,3 +1,4 @@
+import os
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -150,9 +151,9 @@ def calc_interaction(adatas, model: Steamboat, sample_key: str, cell_type_key: s
         
         actual_min = float("inf")
         for celltype0 in celltype_attnp_df.index:
-            mask0 = (adatas[i].obs[cell_type_key] == celltype0)
+            mask0 = (adatas[i].obs[cell_type_key] == celltype0).to_numpy()
             for celltype1 in celltype_attnp_df.columns:
-                mask1 = (adatas[i].obs[cell_type_key] == celltype1)
+                mask1 = (adatas[i].obs[cell_type_key] == celltype1).to_numpy()
                 sub_attnp = total_attnp[mask0, :][:, mask1]
                 normalization_factor = sub_attnp.nnz + pseudocount
                 # normalization_factor = np.prod(sub_attnp.shape)
@@ -448,7 +449,6 @@ def contribution_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: l
         regional_xs = [regional_x.to(device) for regional_x in regional_xs]
         
         with torch.no_grad():
-            res = model(adj_list, x, x, regional_adj_lists, regional_xs, get_details=False)
             res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
                             get_details=False, explained_variance_mask=None)
             contrib['full'] += res.sum(axis=0).cpu().numpy() / raw_gene_weight / total_n_cells
@@ -466,6 +466,69 @@ def contribution_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: l
         avg_contrib[i] = float(avg_contrib[i])
 
     return contrib, avg_contrib
+
+def contribution_by_scale_and_head(model: Steamboat, dataset: SteamboatDataset, 
+                                   adatas: list[sc.AnnData], device='cuda'):
+    """Calculate explained variance for each scale
+
+    :param model: Steamboat model
+    :param dataset: SteamboatDataset object to be processed
+    :param adatas: list of AnnData objects corresponding to the dataset
+    :param device: Device to run the model, defaults to 'cuda'
+    :return: explained variance scores in a dictionary
+    """
+    # Safeguards
+    assert len(adatas) == len(dataset), "mismatch in lenghths of adatas and dataset"
+    for i, (adata, data) in enumerate(zip(adatas, dataset)):
+        assert adata.shape[0] == data[0].shape[0], f"adata[{i}] has {adata.shape[0]} cells but dataset[{i}] has {data[0].shape[0]}."
+
+    # Calculate embeddings and attention scores for each slide
+    total_n_cells = 0
+    raw_gene_weight = 0
+    for x, _, _, _ in dataset:
+        total_n_cells += x.shape[0]
+        raw_gene_weight += x.sum(axis=0).cpu().numpy()
+
+    raw_gene_weight /= total_n_cells
+    gene_weight = raw_gene_weight / raw_gene_weight.sum()
+
+    contrib_by_head = []
+    avg_contrib_by_head = []
+
+    for h in tqdm(range(model.spatial_gather.n_heads)):
+        contrib = {'ego': 0, 'local': 0, 'global': 0, 'full': 0}
+        for i, (x, adj_list, regional_xs, regional_adj_lists) in enumerate(dataset):
+            adj_list = adj_list.squeeze(0).to(device)
+            x = x.squeeze(0).to(device)
+            regional_adj_lists = [regional_adj_list.to(device) for regional_adj_list in regional_adj_lists]
+            regional_xs = [regional_x.to(device) for regional_x in regional_xs]
+            
+            with torch.no_grad():
+                res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                                get_details=False, explained_variance_mask=None, chosen_head=h)
+                contrib['full'] += res.sum(axis=0).cpu().numpy() / raw_gene_weight / total_n_cells
+                for scale in ['ego', 'local', 'global']:
+                    res = model(adj_list, x, x, regional_adj_lists, regional_xs, 
+                                get_details=False, explained_variance_mask=scale, chosen_head=h)
+                    contrib[scale] += res.sum(axis=0).cpu().numpy() /raw_gene_weight / total_n_cells
+            
+        contrib_by_head.append(contrib)
+        avg_contrib = {}
+        avg_contrib['full'] = (contrib['full'] * gene_weight).sum()
+        for scale in ['ego', 'local', 'global']:
+            avg_contrib[scale] = (contrib[scale] * gene_weight).sum()
+        
+        for i in avg_contrib:
+            avg_contrib[i] = float(avg_contrib[i])
+        avg_contrib_by_head.append(avg_contrib)
+
+    avg_contrib_by_head = {
+        'ego': np.array([avg_contrib_by_head[h]['ego'] for h in range(model.spatial_gather.n_heads)]),
+        'local': np.array([avg_contrib_by_head[h]['local'] for h in range(model.spatial_gather.n_heads)]),
+        'global': np.array([avg_contrib_by_head[h]['global'] for h in range(model.spatial_gather.n_heads)]),
+        'full': np.array([avg_contrib_by_head[h]['full'] for h in range(model.spatial_gather.n_heads)]),
+    }
+    return contrib_by_head, avg_contrib_by_head
 
 def sequential_explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
     """Calculate explained variance for each scale
@@ -1005,3 +1068,100 @@ def plot_cell_type_enrichment(all_adata, adatas, score_dim, label_key, select_la
     ax.set_xticks([])
 
     return fig, ax
+
+
+def read_lrdb(species: str = 'human') -> pd.DataFrame:
+    """Read ligand-receptor database
+
+    :param species: Species, either 'human' or 'mouse', defaults to 'human'
+    :return: DataFrame of ligand-receptor pairs
+    """
+    # Find the path to the package
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    if species == 'human':
+        lrdb = pd.read_csv(os.path.join(package_dir, "data/CellChatDB.human.csv.gz"), index_col=0)
+    elif species == 'mouse':
+        lrdb = pd.read_csv(os.path.join(package_dir, "data/CellChatDB.mouse.csv.gz"), index_col=0)
+    else:
+        raise ValueError("species must be 'human' or 'mouse'")
+    return lrdb
+
+
+def score_lrs(adata, model, lrdb, species='human', gene_names='index'):
+    """Calculate ligand-receptor scores based on Steamboat model
+    
+    :param adata: AnnData object containing the data
+    :param model: Steamboat model
+    :param lrdb: Ligand-receptor database
+    :param species: Species, either 'human' or 'mouse', defaults to 'human'
+    :param gene_names: Gene names to use, either 'index' or a column name in adata.var
+
+    :return: List of DataFrames containing ligand-receptor scores for each head
+    """
+    def parse_complex(s):
+        if s[0] != '(':
+            return [s]
+        else:
+            return s[1:-1].split('+')
+            
+    def parse_lr(s):
+        l, r = s.split(' - ')
+        return parse_complex(l), parse_complex(r)
+
+    lrdb = read_lrdb(species)
+
+    lrp = []
+    for i in lrdb['interaction_name_2']:
+        ls, rs = parse_lr(i)
+        for l in ls:
+            for r in rs:
+                lrp.append((l.strip(), r.strip()))
+
+    n_heads = model.spatial_gather.n_heads
+
+    if gene_names == 'index':
+        gene_names = adata.var_names
+    else:
+        gene_names = adata.var[gene_names].values
+
+    k_local = model.spatial_gather.k_local.weight.detach().cpu().numpy()
+    k_global = model.spatial_gather.k_regionals[0].weight.detach().cpu().numpy()
+    q = model.spatial_gather.q.weight.detach().cpu().numpy()
+    v = model.spatial_gather.v.weight.detach().cpu().numpy().T
+
+    index = ([f'k_local_{i}' for i in range(n_heads)] + 
+            [f'k_global_{i}' for i in range(n_heads)] + 
+            [f'q_{i}' for i in range(n_heads)] + 
+            [f'v_{i}' for i in range(n_heads)])
+    gene_df = pd.DataFrame(np.vstack([k_local, k_global, q, v]), 
+                        index=index, columns=gene_names).T
+
+    normalized_gene_df = gene_df.multiply(adata.X.mean(axis=0), axis=0)
+    normalized_gene_df /= normalized_gene_df.max(axis=0)
+    lrp_dfs = []
+    for i in tqdm(range(n_heads)):
+        lrp_df = pd.DataFrame(lrp, columns=['ligand', 'receptor'])
+        lrp_df = lrp_df.drop_duplicates()
+        lrp_df['lr'] = lrp_df['ligand'] + '-' + lrp_df['receptor']
+        lrp_df = lrp_df[(lrp_df['ligand'].isin(gene_names)) & (lrp_df['receptor'].isin(gene_names))]
+
+        lrp_df['kl_score'] = np.log(normalized_gene_df.loc[lrp_df['ligand'].tolist(), f'k_local_{i}'].tolist())
+        lrp_df['qr_score'] = np.log(normalized_gene_df.loc[lrp_df['receptor'].tolist(), f'q_{i}'].tolist())
+        lrp_df['lr_score'] = lrp_df['kl_score'] + lrp_df['qr_score']
+        
+        lrp_df['ql_score'] = np.log(normalized_gene_df.loc[lrp_df['ligand'].tolist(), f'q_{i}'].tolist())
+        lrp_df['kr_score'] = np.log(normalized_gene_df.loc[lrp_df['receptor'].tolist(), f'k_local_{i}'].tolist())
+        lrp_df['rl_score'] = lrp_df['kr_score'] + lrp_df['ql_score']
+
+        lrp_df['k_to_q'] = lrp_df['lr_score'] > lrp_df['rl_score']
+        
+        lrp_df['score'] = np.maximum(lrp_df['lr_score'], lrp_df['rl_score'])
+        
+        xy = np.maximum((lrp_df['kl_score'].to_numpy() + lrp_df['qr_score'].to_numpy()[:, None]).flatten(),
+                        (lrp_df['kr_score'].to_numpy() + lrp_df['ql_score'].to_numpy()[:, None]).flatten())
+        lrp_df['p'] = (lrp_df['score'].to_numpy()[:, None] < xy).sum(axis=1) / len(xy)
+        
+        lrp_df['adj_p'] = sp.stats.false_discovery_control(lrp_df['p'])
+        
+        lrp_dfs.append(lrp_df.sort_values('p'))
+    return lrp_dfs
