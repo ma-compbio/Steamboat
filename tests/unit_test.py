@@ -60,5 +60,52 @@ def test_read_lrdb():
     assert not lrdb_mouse.empty, "Mouse LRDB should not be empty."
 
 
-# def test_evs():
+def test_contribution(tonsil_answer):
+    model, adata = tonsil_answer
+    adata = adata.copy()
+    adata.obs['global'] = 0
+    adatas = sf.prep_adatas([adata], norm=False, log1p=False, n_neighs=8)
+    dataset = sf.make_dataset(adatas, sparse_graph=True, regional_obs=['global'])
+    sf.tools.calc_obs(adatas, dataset, model, get_recon=True, device='cpu')
+    sf.tools.gather_obs(adata, adatas)
 
+    try:
+        gene_scale, scale = sf.tools.contribution_by_scale(model, dataset, adatas, 'cpu')
+    except Exception as e:
+        raise AssertionError("Calculating gene contribution by scale failed.") from e
+    
+    try: 
+        gene_scale, scale = sf.tools.contribution_by_scale_and_head(model, dataset, adatas, 'cpu')
+    except Exception as e:
+        raise AssertionError("Calculating gene contribution by scale and head failed.") from e
+    
+
+def test_cci(tonsil_answer):
+    model, adata = tonsil_answer
+    adata = adata.copy()
+    adata.obs['global'] = 0
+    adatas = sf.prep_adatas([adata], norm=False, log1p=False, n_neighs=8)
+    dataset = sf.make_dataset(adatas, sparse_graph=True, regional_obs=['global'])
+    sf.tools.calc_obs(adatas, dataset, model, get_recon=True, device='cpu')
+    sf.tools.gather_obs(adata, adatas)
+
+    try:
+        cci_matrix = sf.tools.calc_interaction(adatas, model, 'biosample_id', 'cluster')['tonsil1']
+    except Exception as e:
+        raise AssertionError("Calculating cell-cell interaction failed.") from e
+    
+
+def test_lr(tonsil_answer):
+    model, adata = tonsil_answer
+    adata = adata.copy()
+    adata.obs['global'] = 0
+    adatas = sf.prep_adatas([adata], norm=False, log1p=False, n_neighs=8)
+    dataset = sf.make_dataset(adatas, sparse_graph=True, regional_obs=['global'])
+    sf.tools.calc_obs(adatas, dataset, model, get_recon=True, device='cpu')
+    sf.tools.gather_obs(adata, adatas)
+    
+    try:
+        lrp_dfs = sf.tools.score_lrs(adata, model, None, gene_names='index')
+    except Exception as e:
+        raise AssertionError("Scoring ligand-receptor pairs failed.") from e
+    

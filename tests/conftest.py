@@ -28,3 +28,18 @@ def sim_answer():
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     return model, data
+
+@pytest.fixture(scope="session")
+def tonsil_answer():
+    test_dir = Path(__file__).parent
+    data_path = test_dir / "data" / "tonsil_tiny.h5ad"
+    print(f"Loading data from {data_path}...")
+    data = sc.read_h5ad(data_path)
+
+    test_dir = Path(__file__).parent
+    model_path = test_dir / "data" / "tonsil_model.pth"
+    print(f"Loading saved model from {model_path}...")
+    model = sf.Steamboat(data.var_names.tolist(), n_heads=60, n_scales=3)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+
+    return model, data
