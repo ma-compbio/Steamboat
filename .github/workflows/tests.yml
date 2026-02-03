@@ -6,7 +6,7 @@ name: Unit and integration tests
 on:
   push:
     paths:
-      - 'steamboat/**'
+      - ["steamboat/**", "tests/**", ".github/workflows/tests.yml", "requirements.txt", "setup.py"]
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
