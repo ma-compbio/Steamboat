@@ -128,6 +128,7 @@ A few examples in Jupyter notebook are included in the examples folder:
 4. [Colorectal cancer data (CODEX)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
 5. [Xenograft melanoma (Perturb-FISH)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex4_perturbfish.ipynb)
 6. [Human tonsil (Slide-tags)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil.ipynb)
+   - [Select number of heads](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil_select_h.ipynb)
 7. [Breast cancer (Visium)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex6_visium_breast_cancer.ipynb)
 
 The simulation demo takes about five minutes to run. The mouse brain data takes one hour to train. Other demos take about ten minutes each.

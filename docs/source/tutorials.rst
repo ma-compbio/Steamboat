@@ -13,4 +13,5 @@ Tutorials
    tutorial_nbs/Ex3_crc
    tutorial_nbs/Ex4_perturbfish
    tutorial_nbs/Ex5_slidetags_human_tonsil
+   tutorial_nbs/Ex5_slidetags_human_tonsil_select_h
    tutorial_nbs/Ex6_visium_breast_cancer
