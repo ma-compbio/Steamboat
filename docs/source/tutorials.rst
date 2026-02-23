@@ -11,4 +11,6 @@ Tutorials
    tutorial_nbs/Ex2_mouse_brain_interpretation
    tutorial_nbs/Ex2_mouse_brain_spatial_perturbation
    tutorial_nbs/Ex3_crc
-   
+   tutorial_nbs/Ex4_perturbfish
+   tutorial_nbs/Ex5_slidetags_human_tonsil
+   tutorial_nbs/Ex6_visium_breast_cancer
