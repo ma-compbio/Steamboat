@@ -115,15 +115,20 @@ sf.tools.leiden(adata, resolution=0.1)
 sf.tools.segment(adata, resolution=0.5)
 ```
 
+If you want to try Steamboat with a relatively small dataset, please try [human tonsil (Slide-tags)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil.ipynb).
+
 ## Demos
 A few examples in Jupyter notebook are included in the examples folder: 
 1. [Illustration (simulated)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex0_tiny_simulation.ipynb)
-2. [Ovarian cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
-3. Mouse brain
+2. [Ovarian cancer data (CosMX)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex1_hgsc.ipynb)
+3. Mouse brain (MERFISH)
    - [Training](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_train.ipynb)
    - [Interpretation of results, such as clustering, segmentation, global attention explanation, and ligand-receptor analysis](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_interpretation.ipynb)
    - [Spatial perturbation, including cell transplant and environmental knock-out](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex2_mouse_brain_spatial_perturbation.ipynb)
-4. [Colorectal cancer data](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
+4. [Colorectal cancer data (CODEX)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex3_crc.ipynb)
+5. [Xenograft melanoma (Perturb-FISH)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex4_perturbfish.ipynb)
+6. [Human tonsil (Slide-tags)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil.ipynb)
+7. [Breast cancer (Visium)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex6_visium_breast_cancer.ipynb)
 
 The simulation demo takes about five minutes to run. The mouse brain data takes one hour to train. Other demos take about ten minutes each.
 
