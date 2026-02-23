@@ -1,5 +1,5 @@
-scanpy<=1.11.5
-squidpy<=1.6.6
+scanpy
+squidpy
 scipy
 torch
 networkx

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "steamboat-bio"
-version = "0.1.2"
+version = "0.1.4"
 authors = [
   {name="Shaoheng Liang", email="contact@using.issues"},
   {name="Shaoheng Liang", email="author@example.com"},
