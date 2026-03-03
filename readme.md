@@ -90,13 +90,16 @@ import steamboat as sf # "sf" = "Steamboat Factorization"
 import steamboat.tools
 ```
 
+### Data preparation and training
+
 First, make a list (`adatas`) of one or more `AnnData` objects, and preprocess them.
 ```python
 adatas = sf.prep_adatas(adatas, log_norm=True)
 dataset = sf.make_dataset(adatas)
 ```
 
-Create a `Steamboat` model and fit it to the data.
+Create a `Steamboat` model and fit it to the data. 
+Refer to the tutorial about selecting the optimal `n_heads`.
 ```python
 model = sf.Steamboat(short_features, n_heads=10, n_scales=3)
 model = model.to("cuda") # if GPU acceleration is supported.
@@ -108,12 +111,25 @@ After training, you can check the trained metagenes.
 sf.tools.plot_all_transforms(model, top=1)
 ```
 
+### Tissue architecture definition (clustering and segmentation)
+
 For clustering and segmentation, run the following lines. Change the resolution to your liking.
 ```python
 sf.tools.neighbors(adata)
 sf.tools.leiden(adata, resolution=0.1)
 sf.tools.segment(adata, resolution=0.5)
 ```
+
+### Mechanistic discovery (ligand–receptor screening)
+```python
+lrp_dfs = sf.tools.score_lrs(adata, model, None, gene_names='index')
+for i in range(model.spatial_gather.n_heads):
+    display(lrp_dfs[i])
+```
+For visualization of the results, please refer to the [tutorial](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil.ipynb).
+
+### Hypothesis testing (spatial perturbation)
+This is a more involved process. Please refer to the relevant demos below.
 
 If you want to try Steamboat with a relatively small dataset, please try [human tonsil (Slide-tags)](https://github.com/ma-compbio/Steamboat/blob/main/examples/Ex5_slidetags_human_tonsil.ipynb).
 
