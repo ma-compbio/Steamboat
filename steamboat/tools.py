@@ -318,7 +318,7 @@ def calc_geneset_auroc_order(sig_df, by='q'):
     return order
 
 
-def plot_geneset_auroc(sig_df, order, figsize=(8, 5)):
+def plot_geneset_auroc(sig_df, order, figsize=(8, 5), save: str = None):
     """Plot gene set enrichment by AUROC
 
     :param sig_df: Analysis results
@@ -350,6 +350,8 @@ def plot_geneset_auroc(sig_df, order, figsize=(8, 5)):
     ax.set_xlabel('Global environment metagenes')
 
     fig.tight_layout()
+    if save:
+        fig.savefig(save, bbox_inches='tight', transparent=True, dpi=300)
     return fig, ax
 
 def explained_variance_by_scale(model: Steamboat, dataset: SteamboatDataset, adatas: list[sc.AnnData], device='cuda'):
@@ -716,7 +718,7 @@ def segment(adata: sc.AnnData, resolution: float = 1., *,
                         key_added=key_added, resolution=resolution, **leiden_kwargs)
 
 
-def plot_wq(model: Steamboat, chosen_features: List[str], figsize=(3, 3)):
+def plot_vq(model: Steamboat, chosen_features: List[str], figsize=(3, 3), save=None):
     """Plot the reconstruction metagenes (w_q) only
 
     :param model: Steamboat model
@@ -734,9 +736,11 @@ def plot_wq(model: Steamboat, chosen_features: List[str], figsize=(3, 3)):
     common_params = {'linewidths': .05, 'linecolor': 'gray', 'cmap': 'Reds'}
     fig, ax = plt.subplots(figsize=figsize)
     sns.heatmap(q[:, head_order], yticklabels=chosen_features, xticklabels=head_order, square=True, **common_params, ax=ax)
+    if save:
+        fig.savefig(save, bbox_inches='tight', transparent=True, dpi=300)
     return fig, ax
 
-plot_vq = plot_wq # quick fix for a typo...
+plot_wq = plot_vq # quick fix for a typo...
 
 
 def plot_all_transforms2(model, top: int = 3, reorder: bool = False, 
@@ -848,7 +852,8 @@ def plot_all_transforms2(model, top: int = 3, reorder: bool = False,
 def plot_all_transforms(model: Steamboat, 
                    top: int = 3, head_order=None,
                    figsize: str | tuple[float, float] = 'auto',
-                   chosen_features: List[str] = None):
+                   chosen_features: List[str] = None,
+                   save=None):
     """Plot all metagenes for `scale == 3`
 
     :param model: Steamboat model
@@ -928,10 +933,13 @@ def plot_all_transforms(model: Steamboat,
         # ax.get_yaxis().set_visible(False)
     
     plt.tight_layout()
+    if save:
+        fig.savefig(save, bbox_inches='tight', transparent=True, dpi=300)
+    return fig
 
 
 def plot_cell_type_enrichment(all_adata, adatas, score_dim, label_key, select_labels=None,
-                              figsize=(.75, 4)):
+                              figsize=(.75, 4), save=None):
     all_adata.obsm[f'q_{score_dim}'] = np.vstack([i.obsm['q'][:, None, score_dim] for i in adatas])
     all_adata.obsm[f'global_attn_{score_dim}'] = np.vstack([i.obsm['global_attn_0'][:, None, score_dim] for i in adatas])
     all_adata.obsm[f'global_k_0_{score_dim}'] = np.vstack([i.obsm['global_k_0'][:, None, score_dim] for i in adatas])
@@ -1008,6 +1016,9 @@ def plot_cell_type_enrichment(all_adata, adatas, score_dim, label_key, select_la
     #                 verticalalignment='center',
     #                 c='white', size=8)
     ax.set_xticks([])
+
+    if save:
+        ax.figure.savefig(save, bbox_inches="tight", transparent=True)
 
     return fig, ax
 
