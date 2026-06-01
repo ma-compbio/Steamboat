@@ -149,6 +149,8 @@ A few examples in Jupyter notebook are included in the examples folder:
 
 The simulation demo takes about five minutes to run. The mouse brain data takes one hour to train. Other demos take about ten minutes each.
 
+Results not included in the demos can be reproduced by code in `reproducibility` directory. A catalog is provided inside to map figures/results from our manuscripts to the code.
+
 Data used in these examples are available in [Google Drive](https://drive.google.com/drive/folders/1PbLOhYRXp1TKVfPNPWiO4-F3ucsc4u8T?usp=sharing). Trained models are also uploaded.
 
 ## Documentation
