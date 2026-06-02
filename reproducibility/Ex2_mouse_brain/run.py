@@ -5,11 +5,14 @@
 
 # %%
 import os
-# os.makedirs("output", exist_ok=True)
-# try:
-#     os.makedirs("tmp_adata", exist_ok=False)
-# except FileExistsError:
-#     raise SystemExit("Please remove or rename the 'tmp_adata' directory before running this script to avoid overwriting existing data.")
+if os.getcwd() != os.path.dirname(os.path.realpath(__file__)):
+    print("Please run this script from its own directory to avoid path issues.")
+    print("Current working directory:", os.getcwd())
+    exit(1)
+
+os.makedirs("output", exist_ok=True)
+os.makedirs("tmp_adata", exist_ok=True)
+
 
 # specify the path to the root directory of the repository if not installed as a package
 # if you seen ModuleNotFoundError: No module named 'steamboat',
@@ -17,7 +20,6 @@ import os
 # You can change the path below to the absolute root directory of the repository
 import sys
 sys.path.append("../..")
-
 
 device = "cuda"
 import importlib
@@ -50,7 +52,7 @@ pltkw = dict(bbox_inches='tight', transparent=True)
 import steamboat as sf
 import torch
 
-# %%
+
 if not os.path.exists("../data/Ex2_mouse_brain/Zhuang-ABCA-1-labeled.h5ad"): # regenerate the labeled data
     adata = sc.read_h5ad("../data/Ex2_mouse_brain/Zhuang-ABCA-1-raw.h5ad")
     obs = pd.read_csv("../data/Ex2_mouse_brain/label.csv.gz", index_col=0)
@@ -74,7 +76,7 @@ else:
     
 adata
 
-# %%
+
 if False:
     n_genes = 100
     np.random.seed(0)
@@ -91,7 +93,6 @@ sc.pp.normalize_total(adata)
 sc.pp.log1p(adata)
 
 
-# %%
 adatas = []
 for i in adata.obs['brain_section_label'].unique():
     adatas.append(adata[adata.obs['brain_section_label'] == i])
@@ -100,7 +101,7 @@ for i in adata.obs['brain_section_label'].unique():
 adatas = sf.prep_adatas(adatas, norm=False, log1p=False)
 dataset = sf.make_dataset(adatas, sparse_graph=True, regional_obs=['global'])
 
-# %%
+
 sf.set_random_seed(0)
 model = sf.Steamboat(adata.var_names.tolist(), n_heads=50, n_scales=3)
 model = model.to(device)
@@ -200,7 +201,7 @@ fig.savefig(f"output/fig4f_zcoord.png", transparent=False, bbox_inches='tight')
 # This takes a long time so we put it in a separate script: run_clusters_and_domains.py
 
 #############################################################################
-# Fig4h
+# Fig4h, S7: Ligand-receptor pairs
 #############################################################################
 lrdb = pd.read_csv("../data/Ex2_mouse_brain/CellChatDB.mouse.csv.gz", index_col=0)
 
@@ -275,6 +276,38 @@ for i in tqdm(range(n_heads)):
     
     lrp_dfs.append(lrp_df.sort_values('p'))
     
+# Fig S7
+good_lrs = {}
+for i in range(n_heads):
+    temp = lrp_dfs[i][lrp_dfs[i]['adj_p'] <= 0.2]
+    for lr, p in zip(temp['lr'], temp['adj_p']):
+        if lr not in good_lrs:
+            good_lrs[lr] = p
+        else:
+            good_lrs[lr] = min(good_lrs[lr], p)
+
+sorted_lrs = sorted(good_lrs.items(), key=lambda x: x[1])
+print(len(sorted_lrs))
+inv_sorted_lrs = {x[0]: idx for idx, x in enumerate(sorted_lrs)}
+
+heatmap_df = pd.DataFrame(float('nan'), index=[x[0] for x in sorted_lrs], columns=list(range(n_heads)))
+for i in range(n_heads):
+    temp = lrp_dfs[i][lrp_dfs[i]['adj_p'] <= 0.2]
+    for lr, p in zip(temp['lr'], temp['adj_p']):
+        if lr in heatmap_df.index:
+            heatmap_df.loc[lr, i] = p
+
+heatmap_df = heatmap_df.loc[:, heatmap_df.isna().sum(axis=0) < heatmap_df.shape[0]]
+
+fig, ax = plt.subplots(figsize=(4.5, 3.25))
+sns.heatmap(heatmap_df, cmap='Reds_r', ax=ax, cbar_kws={'shrink': 0.5}, linewidths=.5, linecolor='lightgray')
+ax.set_xticks(np.arange(len(heatmap_df.columns)) + 0.5)
+ax.set_xticklabels(heatmap_df.columns.tolist(), rotation=0)
+ax.set_xlabel('Attention Heads')
+ax.set_ylabel('Ligand-Receptor Pairs')
+fig.savefig('output/figS7_lr_summary_heatmap.png', **pltkw)
+    
+# Fig 4h
 fig, ax = plt.subplots(figsize=(1.2, 0.65))
 lrp_dfs[5][lrp_dfs[5]['p'] < 0.05].plot.scatter(y='lr', x='p',  ax=ax)
 ax.set_xticks([0.01, 0.03])
@@ -285,7 +318,7 @@ for pos in ['right', 'top']:
 ax.set_ylim([-0.5, 2.5])
 ax.set_axisbelow(True)
 ax.grid(axis='both', zorder=0)
-fig.savefig("output/fig4h_lrp_pvalue.png", dpi=300, bbox_inches='tight', transparent=False)
+fig.savefig("output/fig4h_lrp_pvalue.png", **pltkw)
 
 def plot_lr(adata, l, r, l_cutoff=0, r_cutoff=0, figsize=(10, 10)):
     adata.obs[f'{l}-{r}'] = ''
