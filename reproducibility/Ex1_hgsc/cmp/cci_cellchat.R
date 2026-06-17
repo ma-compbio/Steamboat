@@ -1,10 +1,13 @@
+# Ovarian cancer data analysis with CellChat
+# Reproduces results in ../../data/Ex1_hgsc/cellchat/ folder
+
 library(Seurat)
 library(CellChat)
 
 future::plan("multisession", workers = 8)
 
-full_obj <- readRDS("../data/ST_Discovery_so.rds")
-sample_meta <- readxl::read_excel("../data/sample_metadata.xlsx", sheet = "Table 2b", skip = 1)
+full_obj <- readRDS("../../data/Ex1_hgsc/ST_Discovery_so.rds")
+sample_meta <- readxl::read_excel("../../data/Ex1_hgsc/sample_metadata.xlsx", sheet = "Table 2b", skip = 1)
 
 mask = (sample_meta['sites_binary'] == 'Adnexa') & (sample_meta['treatment'] == 'Untreated')
 samples_of_interest = sample_meta$profile[mask]
