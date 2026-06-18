@@ -39,7 +39,7 @@ adata = sc.read_h5ad(h5ad_file)
 # adata.obs = metadata
 # adata.var = features
 # adata.obsm['spatial'] = adata.obs[['x', 'y']].to_numpy()
-# adata.write_h5ad("G:/data/HGSC/h5ad/ST_Discovery_so.h5ad")
+# adata.write_h5ad("../data/Ex1_hgsc/ST_Discovery_so.h5ad")
 
 sample_metadata = pd.read_excel(data_path + "sample_metadata.xlsx", index_col=0, sheet_name='Table 2b', skiprows=1)
 sample_metadata = sample_metadata[sample_metadata['dataset'] == 'Discovery']

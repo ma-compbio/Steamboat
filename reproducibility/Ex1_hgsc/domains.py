@@ -158,7 +158,7 @@ use_dataset = cuda_dataset
 if use_dataset is None:
     use_dataset = dataset
 
-model.load_state_dict(torch.load('../examples/saved_models/hgsc.pth', weights_only=True), strict=False)
+model.load_state_dict(torch.load('../data/saved_models/hgsc.pth', weights_only=True), strict=False)
 
 # model.fit(cuda_dataset, entry_masking_rate=0.1, feature_masking_rate=0.1,
 #           max_epoch=10000, 
@@ -175,17 +175,17 @@ for i in range(len(adatas)):
         adata.uns.pop('steamboat_spatial_domain_colors')
     sf.tools.segment(adata, resolution=0.35, key_added="steamboat_spatial_domain", n_prop=2)
     
-    pd.crosstab(adata.obs['steamboat_spatial_domain'], adata.obs['cell.types.nolc']).to_csv(f"./saved_results/hgsc_spatial_domain/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain_crosstab.csv")
+    pd.crosstab(adata.obs['steamboat_spatial_domain'], adata.obs['cell.types.nolc']).to_csv(f"output/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain_crosstab.csv")
 
-    adata.obs['steamboat_spatial_domain'].to_csv(f"./saved_results/hgsc_spatial_domain/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.csv")
+    adata.obs['steamboat_spatial_domain'].to_csv(f"output/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.csv")
     sq.pl.spatial_scatter(adata, color=["steamboat_spatial_domain", "cell.types.nolc"], size=.1, shape=None, legend_loc='right margin', frameon=False, figsize=(3, 3))
-    plt.savefig(f"./saved_results/hgsc_spatial_domain/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.pdf")
+    plt.savefig(f"output/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.pdf")
 
 # %%
 for i in range(len(adatas)):
     adata = adatas[i]
     sq.pl.spatial_scatter(adata, color=["steamboat_spatial_domain", "cell.types.nolc"], size=.1, shape=None, legend_loc='right margin', frameon=False, figsize=(3, 3), ncols=1)
-    plt.savefig(f"./saved_results/hgsc_spatial_domain/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.png", bbox_inches='tight')
+    plt.savefig(f"output/hgsc_{adata.obs['samples'][0]}_steamboat_spatial_domain.png", bbox_inches='tight')
 
 # %%
 df = pd.crosstab(adatas[2].obs['steamboat_spatial_domain'], adatas[2].obs['cell.types.nolc'])
@@ -262,17 +262,17 @@ def polished_spatial_scatter(adata, color, palette=None, size=size, ax=None, ras
 
 
 # %%
-temp_df = pd.read_csv("../../Banksy_py/hgsc_output/SMI_T10_F001.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/banksy/SMI_T10_F001.csv", index_col=0)
 adatas[0].obs['banksy'] = temp_df['banksy'].map(['0', '2', '1'].__getitem__).astype('category')
 
-temp_df = pd.read_csv("../../Banksy_py/hgsc_output/SMI_T10_F006.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/banksy/SMI_T10_F006.csv", index_col=0)
 adatas[2].obs['banksy'] = temp_df['banksy'].map(['1', '0', '2'].__getitem__).astype('category')
 
 # %%
-temp_df = pd.read_csv("./saved_results/hgsc_SMI_T10_F001_stagate_spatial_domain.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/stagate/hgsc_SMI_T10_F001_stagate_spatial_domain.csv", index_col=0)
 adatas[0].obs['STAGATE'] = temp_df['stagate'].map({0: '1', 1: '0', 2: '2'}.__getitem__).astype('category')
 
-temp_df = pd.read_csv("./saved_results/hgsc_SMI_T10_F006_stagate_spatial_domain.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/stagate/hgsc_SMI_T10_F006_stagate_spatial_domain.csv", index_col=0)
 adatas[2].obs['STAGATE'] = temp_df['stagate'].map({0: '1', 1: '2', 2: '0'}.__getitem__).astype('category')
 
 
@@ -280,10 +280,10 @@ adatas[2].obs['STAGATE'] = temp_df['stagate'].map({0: '1', 1: '2', 2: '0'}.__get
 adatas[0].obs['SEDR']
 
 # %%
-temp_df = pd.read_csv("./saved_results/hgsc_SMI_T10_F001_sedr_spatial_domain.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/sedr/hgsc_SMI_T10_F001_sedr_spatial_domain.csv", index_col=0)
 adatas[0].obs['SEDR'] = temp_df['hgsc_SMI_T10_F001_sedr_spatial_domain'].map(['', '0', '1', '2'].__getitem__).astype('category')
 
-temp_df = pd.read_csv("./saved_results/hgsc_SMI_T10_F006_sedr_spatial_domain.csv", index_col=0)
+temp_df = pd.read_csv("../data/Ex1_hgsc/domains/sedr/hgsc_SMI_T10_F006_sedr_spatial_domain.csv", index_col=0)
 adatas[2].obs['SEDR'] = temp_df['hgsc_SMI_T10_F006_sedr_spatial_domain'].map(['', '1', '2', '0'].__getitem__).astype('category')
 
 # %%

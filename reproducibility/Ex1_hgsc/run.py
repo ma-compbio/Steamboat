@@ -55,7 +55,7 @@ adata = sc.read_h5ad(h5ad_file)
 # adata.obs = metadata
 # adata.var = features
 # adata.obsm['spatial'] = adata.obs[['x', 'y']].to_numpy()
-# adata.write_h5ad("G:/data/HGSC/h5ad/ST_Discovery_so.h5ad")
+# adata.write_h5ad("../data/Ex1_hgsc/ST_Discovery_so.h5ad")
 
 sample_metadata = pd.read_excel(data_path + "sample_metadata.xlsx", index_col=0, sheet_name='Table 2b', skiprows=1)
 sample_metadata = sample_metadata[sample_metadata['dataset'] == 'Discovery']
@@ -486,186 +486,186 @@ axes[1].text(x = -0.25, y = 1.05, s = 'b',
 
 fig.savefig('output/figS1fg_cci_summary.png', **pltkw)
 
-if False:
-    ######################################################################################
-    #     Figure S1b: Clustering
-    ######################################################################################
-    temp_file_names = []
-    try:
-        os.makedirs('temp_adata', exist_ok=False)
-    except FileExistsError:
-        print("temp_adata already exists in the working directory. If it's from an interrupted run, please delete it first.")
-    for i, adata in enumerate(adatas):
-        adata.write_h5ad(f"temp_adata/hgsc_{i}.h5ad")
-        temp_file_names.append(f"temp_adata/hgsc_{i}.h5ad")
 
-    # PCA
+######################################################################################
+#     Figure S1b: Clustering
+######################################################################################
+temp_file_names = []
+try:
+    os.makedirs('temp_adata', exist_ok=False)
+except FileExistsError:
+    print("temp_adata already exists in the working directory. If it's from an interrupted run, please delete it first.")
+for i, adata in enumerate(adatas):
+    adata.write_h5ad(f"temp_adata/hgsc_{i}.h5ad")
+    temp_file_names.append(f"temp_adata/hgsc_{i}.h5ad")
 
-    aris = []
-    nmis = []
+# PCA
 
-    def func(i):
-        name = 'pca_cell_type_test'
-        adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
-        # sc.pp.scale(adata)
-        sc.pp.pca(adata, n_comps=25)
-        sc.pp.neighbors(adata)
+aris = []
+nmis = []
 
-        sc.tl.leiden(adata, key_added=name, resolution=0.6)
-        # If you want to save the clustering results for each slide, uncomment the following line
-        # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
-        # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
+def func(i):
+    name = 'pca_cell_type_test'
+    adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
+    # sc.pp.scale(adata)
+    sc.pp.pca(adata, n_comps=25)
+    sc.pp.neighbors(adata)
 
-        ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        
-        return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
+    sc.tl.leiden(adata, key_added=name, resolution=0.6)
+    # If you want to save the clustering results for each slide, uncomment the following line
+    # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
+    # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
 
-    res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
-    for class_nunique, nunique, ari, nmi in res:
-        print(class_nunique, nunique, ari, nmi)
-        aris.append(ari)
-        nmis.append(nmi)
+    ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    
+    return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
 
-    df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
-    df.to_csv(f"temp_adata/pca_cell_type_test.csv")
-    temp_file_names.append(f"temp_adata/pca_cell_type_test.csv")
+res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
+for class_nunique, nunique, ari, nmi in res:
+    print(class_nunique, nunique, ari, nmi)
+    aris.append(ari)
+    nmis.append(nmi)
 
-    # NMF
-    aris = []
-    nmis = []
+df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
+df.to_csv(f"temp_adata/pca_cell_type_test.csv")
+temp_file_names.append(f"temp_adata/pca_cell_type_test.csv")
+
+# NMF
+aris = []
+nmis = []
+name = 'nmf_cell_type_test'
+def func(i):
     name = 'nmf_cell_type_test'
-    def func(i):
-        name = 'nmf_cell_type_test'
-        adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
-        adata.obsm['X_nmf'] = NMF(n_components=25, init='random', random_state=0).fit_transform(adata.X)
-        sc.pp.neighbors(adata, use_rep='X_nmf', key_added='sf', metric='cosine')
-        sc.tl.leiden(adata, resolution=0.5, key_added=name, neighbors_key='sf')
+    adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
+    adata.obsm['X_nmf'] = NMF(n_components=25, init='random', random_state=0).fit_transform(adata.X)
+    sc.pp.neighbors(adata, use_rep='X_nmf', key_added='sf', metric='cosine')
+    sc.tl.leiden(adata, resolution=0.5, key_added=name, neighbors_key='sf')
 
-        # If you want to save the clustering results for each slide, uncomment the following line
-        # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
-        # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
+    # If you want to save the clustering results for each slide, uncomment the following line
+    # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
+    # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
 
-        ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        
-        return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
+    ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    
+    return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
 
-    res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
-    for class_nunique, nunique, ari, nmi in res:
-        print(class_nunique, nunique, ari, nmi)
-        aris.append(ari)
-        nmis.append(nmi)
+res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
+for class_nunique, nunique, ari, nmi in res:
+    print(class_nunique, nunique, ari, nmi)
+    aris.append(ari)
+    nmis.append(nmi)
 
-    df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
-    df.to_csv(f"temp_adata/{name}.csv")
-    temp_file_names.append(f"temp_adata/{name}.csv")
+df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
+df.to_csv(f"temp_adata/{name}.csv")
+temp_file_names.append(f"temp_adata/{name}.csv")
 
-    # Steamboat
-    aris = []
-    nmis = []
+# Steamboat
+aris = []
+nmis = []
+name = 'steamboat_cell_type_test'
+def func(i):
     name = 'steamboat_cell_type_test'
-    def func(i):
-        name = 'steamboat_cell_type_test'
-        adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
+    adata = sc.read_h5ad(f"temp_adata/hgsc_{i}.h5ad")
 
-        adata.obsm['std_attn'] = adata.obsm['attn'] / adata.obsm['attn'].std(axis=0, keepdims=True)
-        sc.pp.neighbors(adata, use_rep='std_attn', key_added='sf', metric='cosine')
-        sc.tl.leiden(adata, resolution=0.55, key_added=name, neighbors_key='sf')
+    adata.obsm['std_attn'] = adata.obsm['attn'] / adata.obsm['attn'].std(axis=0, keepdims=True)
+    sc.pp.neighbors(adata, use_rep='std_attn', key_added='sf', metric='cosine')
+    sc.tl.leiden(adata, resolution=0.55, key_added=name, neighbors_key='sf')
 
-        # If you want to save the clustering results for each slide, uncomment the following line
-        # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
-        # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
+    # If you want to save the clustering results for each slide, uncomment the following line
+    # adata.obs[[name]].to_csv(f"temp_adata/{name}_{i}.csv")
+    # temp_file_names.append(f"temp_adata/{name}_{i}.csv")
 
-        ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
-        
-        return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
+    ari = sklearn.metrics.adjusted_rand_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    nmi = sklearn.metrics.normalized_mutual_info_score(adata.obs['cell.types.nolc'], adata.obs[name])
+    
+    return adata.obs['cell.types.nolc'].nunique(), adata.obs[name].nunique(), ari, nmi
 
-    res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
-    for class_nunique, nunique, ari, nmi in res:
-        print(class_nunique, nunique, ari, nmi)
-        aris.append(ari)
-        nmis.append(nmi)
+res = Parallel(n_jobs=n_jobs)(delayed(func)(i) for i in tqdm(range(27), total=27))
+for class_nunique, nunique, ari, nmi in res:
+    print(class_nunique, nunique, ari, nmi)
+    aris.append(ari)
+    nmis.append(nmi)
 
-    df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
-    df.to_csv(f"temp_adata/{name}.csv")
-    temp_file_names.append(f"temp_adata/{name}.csv")
+df = pd.DataFrame({'ARI': aris, 'NMI': nmis})
+df.to_csv(f"temp_adata/{name}.csv")
+temp_file_names.append(f"temp_adata/{name}.csv")
 
-    # Summarize the results
-    dfs = {}
-    dfs['Steamboat'] = pd.read_csv("temp_adata/steamboat_cell_type_test.csv", index_col=0)
-    dfs['PCA'] = pd.read_csv("temp_adata/pca_cell_type_test.csv", index_col=0)
-    dfs['NMF'] = pd.read_csv("temp_adata/nmf_cell_type_test.csv", index_col=0)
+# Summarize the results
+dfs = {}
+dfs['Steamboat'] = pd.read_csv("temp_adata/steamboat_cell_type_test.csv", index_col=0)
+dfs['PCA'] = pd.read_csv("temp_adata/pca_cell_type_test.csv", index_col=0)
+dfs['NMF'] = pd.read_csv("temp_adata/nmf_cell_type_test.csv", index_col=0)
 
-    paragon = 'Steamboat'
+paragon = 'Steamboat'
 
-    ari_df = []
-    nmi_df = []
+ari_df = []
+nmi_df = []
 
-    columns = []
+columns = []
 
-    for i in dfs:
-        if i != paragon:
-            temp = dfs[paragon] - dfs[i]
-            columns.append(i)
-            ari_df.append(temp['ARI'])
-            nmi_df.append(temp['NMI'])
-        else:
-            columns.append(i)
-            temp = dfs[paragon].copy()
-            temp[:] = float('nan')
-            ari_df.append(temp['ARI'])
-            nmi_df.append(temp['NMI'])
-
-    ari_df = pd.concat(ari_df, axis=1)
-    ari_df.columns = columns
-    nmi_df = pd.concat(nmi_df, axis=1)
-    nmi_df.columns = columns
-
-    orig_ari_df = []
-    orig_nmi_df = []
-
-    columns = []
-
-    for i in dfs:
-        temp = dfs[i]
+for i in dfs:
+    if i != paragon:
+        temp = dfs[paragon] - dfs[i]
         columns.append(i)
-        orig_ari_df.append(temp['ARI'])
-        orig_nmi_df.append(temp['NMI'])
+        ari_df.append(temp['ARI'])
+        nmi_df.append(temp['NMI'])
+    else:
+        columns.append(i)
+        temp = dfs[paragon].copy()
+        temp[:] = float('nan')
+        ari_df.append(temp['ARI'])
+        nmi_df.append(temp['NMI'])
 
-    orig_ari_df = pd.concat(orig_ari_df, axis=1)
-    orig_ari_df.columns = columns
-    orig_nmi_df = pd.concat(orig_nmi_df, axis=1)
-    orig_nmi_df.columns = columns
+ari_df = pd.concat(ari_df, axis=1)
+ari_df.columns = columns
+nmi_df = pd.concat(nmi_df, axis=1)
+nmi_df.columns = columns
 
-    # Plotting the results
-    fig, axes = plt.subplots(1, 4, figsize=(4, .4 + len(columns) * .24), sharey='row')
-    sns.violinplot(orig_ari_df, orient='h', ax=axes[0], linewidth=.5, color='C0', width=1.)
-    axes[0].set_xlabel('ARI')
-    sns.violinplot(orig_nmi_df, orient='h', ax=axes[2], linewidth=.5, color='C0', width=1.)
-    axes[2].set_xlabel('NMI')
+orig_ari_df = []
+orig_nmi_df = []
 
-    sns.violinplot(ari_df, orient='h', ax=axes[1], linewidth=.5, color='C1', width=1.)
-    axes[1].set_xlabel('ΔARI')
-    axes[1].axvline(0, zorder=-1, c='C3', ls='--', linewidth=.5)
+columns = []
 
-    sns.violinplot(nmi_df, orient='h', ax=axes[3], linewidth=.5, color='C1', width=1.)
-    axes[3].set_xlabel('ΔNMI')
-    axes[3].axvline(0, zorder=-1, c='C3', ls='--', linewidth=.5)
+for i in dfs:
+    temp = dfs[i]
+    columns.append(i)
+    orig_ari_df.append(temp['ARI'])
+    orig_nmi_df.append(temp['NMI'])
 
-    for i in range(4):
-        axes[i].set_xticklabels(axes[i].get_xticklabels(), rotation=60)
-        for pos in ['right', 'top']:
-            axes[i].spines[pos].set_visible(False)
+orig_ari_df = pd.concat(orig_ari_df, axis=1)
+orig_ari_df.columns = columns
+orig_nmi_df = pd.concat(orig_nmi_df, axis=1)
+orig_nmi_df.columns = columns
 
-    axes[0].set_ylabel('Clustering')
-    fig.tight_layout(pad=0.4)
-    fig.align_xlabels()
-    fig.savefig("output/figs1b_clustering.png", **pltkw)
+# Plotting the results
+fig, axes = plt.subplots(1, 4, figsize=(4, .4 + len(columns) * .24), sharey='row')
+sns.violinplot(orig_ari_df, orient='h', ax=axes[0], linewidth=.5, color='C0', width=1.)
+axes[0].set_xlabel('ARI')
+sns.violinplot(orig_nmi_df, orient='h', ax=axes[2], linewidth=.5, color='C0', width=1.)
+axes[2].set_xlabel('NMI')
 
-    # Cleaning
-    # if you want to keep the temp_adata folder for further analysis, comment out the following lines.
-    for file_name in temp_file_names:
-        os.remove(file_name)
-    os.rmdir('temp_adata')
+sns.violinplot(ari_df, orient='h', ax=axes[1], linewidth=.5, color='C1', width=1.)
+axes[1].set_xlabel('ΔARI')
+axes[1].axvline(0, zorder=-1, c='C3', ls='--', linewidth=.5)
+
+sns.violinplot(nmi_df, orient='h', ax=axes[3], linewidth=.5, color='C1', width=1.)
+axes[3].set_xlabel('ΔNMI')
+axes[3].axvline(0, zorder=-1, c='C3', ls='--', linewidth=.5)
+
+for i in range(4):
+    axes[i].set_xticklabels(axes[i].get_xticklabels(), rotation=60)
+    for pos in ['right', 'top']:
+        axes[i].spines[pos].set_visible(False)
+
+axes[0].set_ylabel('Clustering')
+fig.tight_layout(pad=0.4)
+fig.align_xlabels()
+fig.savefig("output/figs1b_clustering.png", **pltkw)
+
+# Cleaning
+# if you want to keep the temp_adata folder for further analysis, comment out the following lines.
+for file_name in temp_file_names:
+    os.remove(file_name)
+os.rmdir('temp_adata')
